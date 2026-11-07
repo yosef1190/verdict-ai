@@ -1,0 +1,264 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Verdict Research</title>
+<style>
+  :root {
+    --bg: #0a0a0f; --panel: #14141d; --panel-2: #1a1a26; --line: #2a2a3a;
+    --fg: #e8e8f0; --muted: #8a8aa0; --accent: #00d4aa; --accent-fg: #04201a;
+    --danger: #ff6b6b; --danger-bg: #2a1214; --warn: #f5b942;
+  }
+  @media (prefers-color-scheme: light) {
+    :root:not([data-theme="dark"]) {
+      --bg: #f6f7fb; --panel: #ffffff; --panel-2: #f0f1f7; --line: #dcdeea;
+      --fg: #161622; --muted: #62647a; --accent: #00a889; --accent-fg: #ffffff;
+      --danger: #c62828; --danger-bg: #fdecec; --warn: #9a6a00;
+    }
+  }
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0; background: var(--bg); color: var(--fg); min-height: 100vh;
+    font: 16px/1.55 system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+  .wrap { max-width: 860px; margin: 0 auto; padding: 2.5rem 1.25rem 4rem; }
+  header { margin-bottom: 1.75rem; }
+  .brand { display: flex; align-items: baseline; gap: .6rem; }
+  h1 { margin: 0; font-size: 1.75rem; letter-spacing: -.01em; }
+  .ver { color: var(--muted); font-size: .8rem; }
+  .tag { margin: .35rem 0 0; color: var(--muted); }
+
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 1.25rem; }
+  button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  label { display: block; font-size: .85rem; color: var(--muted); margin-bottom: .3rem; }
+  input[type=text], select {
+    width: 100%; padding: .7rem .8rem; border-radius: 8px; border: 1px solid var(--line);
+    background: var(--panel-2); color: var(--fg); font: inherit;
+  }
+  .hint { color: var(--muted); font-size: .82rem; margin: .4rem 0 0; }
+  .row { display: flex; gap: .75rem; align-items: stretch; }
+  .row > .grow { flex: 1; }
+
+  .btn {
+    border: 0; border-radius: 8px; padding: .7rem 1.2rem; font: inherit; font-weight: 600; cursor: pointer;
+    background: var(--accent); color: var(--accent-fg); white-space: nowrap;
+  }
+  .btn:disabled { opacity: .55; cursor: not-allowed; }
+  .btn.ghost { background: transparent; color: var(--fg); border: 1px solid var(--line); font-weight: 500; }
+
+  details { margin-top: 1rem; }
+  summary { cursor: pointer; color: var(--muted); font-size: .88rem; }
+  .opts { display: grid; grid-template-columns: 1fr 1fr; gap: .9rem; margin-top: .9rem; }
+  .opts .full { grid-column: 1 / -1; }
+  .check { display: flex; gap: .5rem; align-items: center; font-size: .9rem; color: var(--fg); margin: 0; }
+  @media (max-width: 560px) { .opts { grid-template-columns: 1fr; } .row { flex-direction: column; } }
+
+  .banner { border-radius: 10px; padding: .75rem 1rem; margin-bottom: 1rem; font-size: .9rem; }
+  .banner.warn { background: var(--panel-2); border: 1px solid var(--line); color: var(--warn); }
+  .banner.err { background: var(--danger-bg); color: var(--danger); border: 1px solid var(--danger); white-space: pre-wrap; }
+
+  #progress { margin-top: 1.25rem; }
+  #progress ol { list-style: none; margin: 0; padding: 0; }
+  #progress li { display: flex; gap: .6rem; padding: .3rem 0; color: var(--muted); font-size: .92rem; }
+  #progress li.done::before { content: "✓"; color: var(--accent); }
+  #progress li.current { color: var(--fg); }
+  #progress li.current::before { content: ""; width: .9rem; height: .9rem; margin-top: .2rem; border-radius: 50%;
+    border: 2px solid var(--line); border-top-color: var(--accent); animation: spin .8s linear infinite; flex: none; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  @media (prefers-reduced-motion: reduce) { #progress li.current::before { animation: none; border-top-color: var(--line); } }
+
+  #report-wrap { margin-top: 1.5rem; }
+  .report-bar { display: flex; flex-wrap: wrap; gap: .5rem; justify-content: space-between; align-items: center; margin-bottom: .75rem; }
+  .report-bar .actions { display: flex; gap: .5rem; flex-wrap: wrap; }
+  .report { overflow-wrap: anywhere; }
+  .report h1 { font-size: 1.5rem; margin: 0 0 .75rem; }
+  .report h2 { font-size: 1.15rem; margin: 1.75rem 0 .5rem; color: var(--accent); }
+  .report h3 { font-size: 1rem; margin: 1.25rem 0 .35rem; }
+  .report p, .report li { line-height: 1.65; }
+  .report ul, .report ol { padding-left: 1.3rem; }
+  .report a { color: var(--accent); }
+  .report hr { border: 0; border-top: 1px solid var(--line); margin: 1.5rem 0; }
+  .report blockquote { margin: 1rem 0; padding: .1rem 1rem; border-left: 3px solid var(--accent); color: var(--muted); }
+  .report code { background: var(--panel-2); padding: .1rem .35rem; border-radius: 4px; font-size: .9em; }
+  .report table { border-collapse: collapse; display: block; overflow-x: auto; max-width: 100%; }
+  .report th, .report td { border: 1px solid var(--line); padding: .4rem .65rem; text-align: left; }
+  .hidden { display: none !important; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="brand"><h1>Verdict Research</h1><span class="ver">v{{ version }}</span></div>
+    <p class="tag">Paste a product link and get a researched report with citations.</p>
+  </header>
+
+  {% if not scrape_ready %}
+  <div class="banner err">OXYLABS_API_KEY isn’t set on the server, so scraping won’t work. Add it to .env and restart.</div>
+  {% elif not ai_ready %}
+  <div class="banner warn">No AI key set (NVIDIA_API_KEY, GEMINI_API_KEY or OPENROUTER_API_KEY). Reports will contain extracted text only, without AI summaries.</div>
+  {% endif %}
+
+  <form id="form" class="card" autocomplete="off">
+    <div class="row">
+      <div class="grow">
+        <label for="text">Product URL</label>
+        <input type="text" id="text" name="text" required inputmode="url" spellcheck="false" placeholder="https://www.amazon.com/dp/…">
+      </div>
+      <div style="align-self:end"><button class="btn" id="go" type="submit">Research product</button></div>
+    </div>
+    <p class="hint">Reads the product page, finds independent reviews and complaints across the web, then scores it from 0 to 100.</p>
+
+    <details>
+      <summary>Options</summary>
+      <div class="opts">
+        <div class="full">
+          <label for="keywords">Search keywords (optional)</label>
+          <input type="text" id="keywords" placeholder="e.g. Sony WH-1000XM5 — leave blank to let the AI choose">
+        </div>
+        <div>
+          <label for="focus">Focus (optional)</label>
+          <input type="text" id="focus" placeholder="e.g. durability, returns, sizing">
+        </div>
+        <div>
+          <label for="engine">Search engine</label>
+          <select id="engine">
+            {% for e in engines %}<option value="{{ e }}"{% if e == 'yahoo' %} selected{% endif %}>{{ e|capitalize }}</option>{% endfor %}
+          </select>
+        </div>
+        <label class="check"><input type="checkbox" id="render"> Render JavaScript (slower, uses more Oxylabs credits)</label>
+        <label class="check"><input type="checkbox" id="no_ai"> Extract only, skip AI</label>
+      </div>
+    </details>
+  </form>
+
+  <div id="error" class="banner err hidden" role="alert" style="margin-top:1rem"></div>
+
+  <section id="progress" class="card hidden" aria-live="polite" aria-label="Progress">
+    <ol id="steps"></ol>
+  </section>
+
+  <section id="report-wrap" class="card hidden">
+    <div class="report-bar">
+      <strong id="report-title"></strong>
+      <div class="actions">
+        <button class="btn ghost" type="button" id="copy">Copy Markdown</button>
+        <button class="btn ghost" type="button" id="download">Download .md</button>
+        <button class="btn ghost" type="button" id="again">New research</button>
+      </div>
+    </div>
+    <article class="report" id="report"></article>
+  </section>
+</div>
+
+<script>
+(function () {
+  const $ = (id) => document.getElementById(id);
+  const form = $("form"), go = $("go"), errBox = $("error");
+  let running = false, lastMarkdown = "", lastTitle = "";
+
+  function showError(msg) { errBox.textContent = msg; errBox.classList.remove("hidden"); }
+  function clearError() { errBox.classList.add("hidden"); errBox.textContent = ""; }
+
+  const stepsEl = $("steps");
+  function addStep(text) {
+    const prev = stepsEl.querySelector("li.current");
+    if (prev) prev.className = "done";
+    const li = document.createElement("li");
+    li.className = "current";
+    li.textContent = text;
+    stepsEl.appendChild(li);
+  }
+  function finishSteps() { const c = stepsEl.querySelector("li.current"); if (c) c.className = "done"; }
+
+  function setBusy(b) {
+    running = b; go.disabled = b;
+  }
+
+  async function poll(id) {
+    let seen = 0, failures = 0;
+    for (;;) {
+      await new Promise(r => setTimeout(r, 1200));
+      let data;
+      try {
+        const res = await fetch(`/api/jobs/${id}?since=${seen}`);
+        if (res.status === 404) throw new Error("This job expired. Please run it again.");
+        data = await res.json();
+        failures = 0;
+      } catch (e) {
+        if (e.message && e.message.startsWith("This job")) throw e;
+        if (++failures >= 5) throw new Error("Lost connection to the server.");
+        continue;
+      }
+      (data.steps || []).forEach(addStep);
+      seen = data.step_count;
+      if (data.status === "done") return data;
+      if (data.status === "error") throw new Error(data.error || "Research failed.");
+    }
+  }
+
+  function showReport(data) {
+    lastMarkdown = data.markdown; lastTitle = data.title || "report";
+    $("report-title").textContent = lastTitle;
+    const article = $("report");
+    article.innerHTML = data.html;   // server renders with raw HTML disabled
+    article.querySelectorAll("a").forEach(a => { a.target = "_blank"; a.rel = "noopener noreferrer nofollow"; });
+    $("report-wrap").classList.remove("hidden");
+    $("report-wrap").scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+
+  form.addEventListener("submit", async (ev) => {
+    ev.preventDefault();
+    if (running) return;
+    clearError();
+    $("report-wrap").classList.add("hidden");
+    stepsEl.innerHTML = "";
+    $("progress").classList.remove("hidden");
+    addStep("Starting");
+    setBusy(true);
+    try {
+      const res = await fetch("/api/research", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          text: $("text").value,
+          keywords: $("keywords").value, focus: $("focus").value,
+          engine: $("engine").value, render: $("render").checked, no_ai: $("no_ai").checked,
+        }),
+      });
+      const started = await res.json();
+      if (!res.ok) throw new Error(started.error || "Could not start research.");
+      const data = await poll(started.id);
+      finishSteps();
+      showReport(data);
+    } catch (e) {
+      $("progress").classList.add("hidden");
+      showError(e.message || "Something went wrong.");
+    } finally {
+      setBusy(false);
+    }
+  });
+
+  $("copy").addEventListener("click", async () => {
+    try { await navigator.clipboard.writeText(lastMarkdown); $("copy").textContent = "Copied"; }
+    catch { $("copy").textContent = "Copy failed"; }
+    setTimeout(() => $("copy").textContent = "Copy Markdown", 1500);
+  });
+  $("download").addEventListener("click", () => {
+    const blob = new Blob([lastMarkdown], { type: "text/markdown" });
+    const a = document.createElement("a");
+    const slug = lastTitle.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 60) || "report";
+    a.href = URL.createObjectURL(blob); a.download = slug + ".md";
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  });
+  $("again").addEventListener("click", () => {
+    $("report-wrap").classList.add("hidden"); $("progress").classList.add("hidden");
+    $("text").value = ""; $("text").focus(); window.scrollTo({ top: 0, behavior: "smooth" });
+  });
+})();
+</script>
+</body>
+</html>
