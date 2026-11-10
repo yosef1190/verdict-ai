@@ -1,0 +1,20 @@
+# Root-level requirements for Vercel Python Function deployment
+# These are in addition to the backend/requirements.txt
+
+# FastAPI and ASGI
+fastapi>=0.109.0
+uvicorn[standard]>=230.0
+
+# Supabase Python client
+supabase>=2.5.0
+
+# The existing verdict package dependencies (from backend/requirements.txt)
+requests>=2.31
+beautifulsoup4>=4.12
+python-dotenv>=1.0
+rich>=13.7
+trafilatura>=1.8
+
+# Additional utilities
+pyjwt[crypto]>=2.8.0  # For JWT token handling if needed
+pydantic>=2.7.0  # For request validation

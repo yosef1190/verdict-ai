@@ -1,0 +1,13 @@
+{
+  "routes": [
+    {
+      "source": "/api/(.*)",
+      "dest": "/api/research.py"
+    }
+  ],
+  "functions": {
+    "api/research.py": {
+      "runtime": "python3.11"
+    }
+  }
+}
