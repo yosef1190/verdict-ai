@@ -1,9 +1,9 @@
 // Type definitions for Supabase PostgreSQL database
 // These correspond to tables in your Supabase project
 
-import { createSupabaseClient } from "@supabase/supabase-js";
+import { createClient } from "@supabase/supabase-js";
 
-type SupabaseClient = ReturnType<typeof createSupabaseClient>;
+type SupabaseClient = ReturnType<typeof createClient>;
 
 export type Database = {
   public: {

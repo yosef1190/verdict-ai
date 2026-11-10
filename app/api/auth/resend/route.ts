@@ -29,24 +29,78 @@ export async function POST(req: Request) {
       }
     );
 
-    const {
-      data: { session },
-    } = await supabase.auth.getSession();
+    const body = await req.json();
+    const { type, credentials } = body;
 
-    return NextResponse.json({
-      ok: true,
-      note: "Google sign-in doesn't use email codes.",
-      session: session
-        ? {
-            user: {
-              id: session.user.id,
-              email: session.user.email,
-            },
-          }
-        : null,
-    });
+    if (type === "google") {
+      const {
+        data: { session },
+        error,
+      } = await supabase.auth.getSession();
+
+      if (error) {
+        return NextResponse.json({ error: error.message }, { status: 400 });
+      }
+
+      return NextResponse.json({
+        ok: true,
+        session: session
+          ? {
+              access_token: session.access_token,
+              expires_at: session.expires_at,
+              user: session.user
+                ? {
+                    id: session.user.id,
+                    email: session.user.email,
+                  }
+                : null,
+            }
+          : null,
+      });
+    }
+
+    if (type === "email") {
+      const { email, password } = credentials ?? {};
+
+      if (!email || !password) {
+        return NextResponse.json(
+          { error: "Email and password are required." },
+          { status: 400 }
+        );
+      }
+
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email,
+        password,
+      });
+
+      if (error) {
+        return NextResponse.json({ error: error.message }, { status: 400 });
+      }
+
+      return NextResponse.json({
+        ok: true,
+        user: data.user
+          ? {
+              id: data.user.id,
+              email: data.user.email,
+            }
+          : null,
+        session: data.session
+          ? {
+              access_token: data.session.access_token,
+              expires_at: data.session.expires_at,
+            }
+          : null,
+      });
+    }
+
+    return NextResponse.json(
+      { error: "Invalid login type" },
+      { status: 400 }
+    );
   } catch (error) {
-    console.error("Supabase resend error:", error);
+    console.error("Supabase login error:", error);
 
     return NextResponse.json(
       { error: "Internal server error" },

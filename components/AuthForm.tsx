@@ -16,7 +16,7 @@ const GoogleG = () => (
   </svg>
 );
 
-export default function AuthForm({ mode }: { mode: "signin" }) {
+export default function AuthForm({ mode }: { mode: "signin" | "signup" }) {
   const { user, loading, signInWithGoogle, signOut } = useAuth();
   const router = useRouter();
 
