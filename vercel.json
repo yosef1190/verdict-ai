@@ -1,9 +1,40 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "routes": [
+
+  "services": {
+    "app": {
+      "root": ".",
+      "framework": "nextjs",
+      "buildCommand": "npm run build",
+      "devCommand": "npm run dev"
+    },
+
+    "backend": {
+      "root": "api",
+      "framework": "fastapi",
+      "buildCommand": "pip install -r requirements.txt",
+      "devCommand": "python -m uvicorn research:app --host 0.0.0.0 --port $PORT"
+    }
+  },
+
+  "bindings": [
+    {
+      "type": "service",
+      "service": "backend",
+      "format": "url",
+      "env": "RESEARCH_API_URL"
+    }
+  ],
+
+  "rewrites": [
     {
       "source": "/api/(.*)",
-      "dest": "/api/research.py"
+      "destination": "backend"
+    },
+
+    {
+      "source": "/(.*)",
+      "destination": "app"
     }
   ]
 }

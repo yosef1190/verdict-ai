@@ -1,14 +1,16 @@
 import "server-only";
 import { createClient } from "@supabase/supabase-js";
 
-/** Where the Vercel-deployed Python research API is listening. */
-export const RESEARCH_API_URL = (process.env.RESEARCH_API_URL || "").replace(/\/$/, "");
-/*
- * Set NEXT_PUBLIC_RESEARCH_API_URL in Vercel env vars to your
- * Vercel Python Function URL, e.g.
- *   https://your-project.vercel.app/api
- * If left empty, the relay will construct the URL from the current
- * origin, but for production deployments you should set this.
+/** URL of the Vercel-deployed Python research API.
+ * In Vercel services mode, this is automatically set via the RESEARCH_API_URL binding
+ * from the backend service. No manual configuration needed.
+ */
+export const RESEARCH_API_URL = process.env.RESEARCH_API_URL || "http://localhost:8000";
+
+/**
+ * Fallback: if RESEARCH_API_URL is not set (e.g. local dev without the binding),
+ * the relay function will use the default above. In production, the Vercel
+ * binding ensures this is always set.
  */
 
 /** Verifies the Supabase access token sent by the browser. Returns the user, or null. */
