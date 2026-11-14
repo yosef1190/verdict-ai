@@ -41,7 +41,7 @@ if not SUPABASE_URL or not SUPABASE_SERVICE_ROLE_KEY:
 sb: Client = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
 
 # --- Research Pipeline Imports ---
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'backend'))
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'backend')))
 
 from verdict.config import Settings
 from verdict.errors import VerdictError
