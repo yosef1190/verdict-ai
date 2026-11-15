@@ -1,21 +1,4 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-
-  "services": {
-    "app": {
-      "root": ".",
-      "framework": "nextjs",
-      "buildCommand": "npm run build",
-      "devCommand": "npm run dev"
-    }
-  },
-
-  "bindings": [
-    {
-      "type": "service",
-      "service": "backend",
-      "format": "url",
-      "env": "RESEARCH_API_URL"
-    }
-  ]
+  "framework": "nextjs"
 }
