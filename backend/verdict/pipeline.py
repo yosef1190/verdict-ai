@@ -196,7 +196,7 @@ def run_review(req: ResearchRequest, settings: Settings, progress: Progress) -> 
         progress(f"Product identified: {short(detail, 120)}")
     progress(f"Researching {len(queries)} topic{'s' if len(queries) != 1 else ''}")
 
-    limit = req.limit or 10
+    limit = req.limit or 5
     primary_urls = {product.url, product_url}
     merged: list[SearchResult] = []
     seen: set[str] = set()
@@ -222,7 +222,7 @@ def run_review(req: ResearchRequest, settings: Settings, progress: Progress) -> 
     progress(f"Found {len(merged)} independent results")
 
     sources, failures = gather_search_sources(
-        client, merged, progress, count=req.scrape_count or 5, run_js=req.render
+        client, merged, progress, count=req.scrape_count or 3, run_js=req.render
     )
     if not sources:
         raise VerdictError(
