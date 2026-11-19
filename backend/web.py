@@ -232,7 +232,7 @@ def create_app(settings: Settings | None = None) -> Flask:
         _supabase_create_job(job_id, None, "queued", [])
 
         # Run the research pipeline in a background thread
-        pool.submit(work, job)
+        pool.submit(work, jobs[job_id])
         return jsonify(id=job_id), 202
 
     @app.get("/api/jobs/<job_id>")
