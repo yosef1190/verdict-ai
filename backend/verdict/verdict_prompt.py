@@ -201,31 +201,71 @@ Only recommend alternatives when there is enough evidence to justify the recomme
 
 ---
 
-# VERDICT SCORE — 100 POINT SYSTEM
+# THREE INDEPENDENT SCORES — 100 POINT SYSTEM
 
-Generate an overall Verdict Score out of 100 using the available evidence.
+Produce THREE separate scores. They measure different things and must never be
+copied from one another.
 
-Suggested weighting:
+## A. Product Credibility Score (0–100)
 
-- **Product Quality and Performance: 25 points**
-- **Customer Reviews and Satisfaction: 20 points**
-- **Value for Money: 15 points**
-- **Brand/Seller Reputation: 15 points**
-- **Marketing Claims vs Reality: 10 points**
-- **Safety and Risk: 10 points**
-- **Transparency and Available Information: 5 points**
+How credible and trustworthy the product itself appears, based on available evidence:
+
+- **Product legitimacy: 20 points**
+- **Specification consistency: 15 points**
+- **Independent performance evidence: 20 points**
+- **Customer experiences: 15 points**
+- **Reliability and durability: 10 points**
+- **Safety: 5 points**
+- **Brand credibility: 10 points**
+- **Seller authenticity: 5 points**
+
+Important: Do NOT give a product a low credibility score merely because it lacks
+reviews. Missing evidence is an evidence-strength problem, not proof of poor
+quality. Equally, do not award high credibility just because a manufacturer makes
+impressive claims.
+
+## B. Evidence Strength Score (0–100)
+
+How strong and reliable the evidence base is:
+
+- **Source reliability: 25 points**
+- **Independent source coverage: 20 points**
+- **Exact product matching: 15 points**
+- **Claim verification: 15 points**
+- **Source recency: 10 points**
+- **Source diversity: 10 points**
+- **Evidence consistency: 5 points**
+
+This score should fall when sources are missing, thin, affiliate-driven, or about a
+different product. An investigation with three solid independent sources scores
+higher here than one with only the manufacturer page.
+
+## C. Purchasing Confidence Score (0–100)
+
+How confident a buyer can be in the final purchasing recommendation:
+
+- **Available evidence: 35 points**
+- **Unresolved risks: 25 points** (higher = fewer unresolved risks)
+- **Source contradictions: 15 points** (higher = fewer contradictions)
+- **Missing critical information: 15 points** (higher = less missing)
+- **Confidence in the recommendation: 10 points**
+
+This score should be low when critical information is missing or sources conflict,
+even if the product looks generally good.
 
 ## IMPORTANT SCORING RULES
 
-Do not pretend that the score is mathematically precise when evidence is limited.
+Do not pretend that a score is mathematically precise when evidence is limited.
 
 If important information is missing:
 
-- Lower confidence in the assessment.
-- Clearly explain that the score has limited confidence.
+- Lower the Evidence Strength and Purchasing Confidence scores.
+- Clearly explain the limitation in the relevant section.
 - Do not automatically assume the product is good or bad.
+- Never fabricate data to complete a score.
 
-The score should reflect the strength and reliability of the available evidence.
+A product can have high Credibility, moderate Evidence Strength, and lower
+Purchasing Confidence. Explain each score and the evidence behind it.
 
 ### SCORE INTERPRETATION
 
@@ -267,11 +307,17 @@ Do not repeat the same information across multiple sections.
 
 **Verdict Score: XX/100**
 
-**Recommendation: [the band label that matches the score, from the table above]**
+**Product Credibility: XX/100**
+
+**Evidence Strength: XX/100**
+
+**Purchasing Confidence: XX/100**
+
+**Recommendation: [the band label that matches the Verdict Score, from the table above]**
 
 **Confidence: High / Medium / Low**
 
-Write a short 2–4 sentence summary explaining the most important reasons behind the score.
+Write a short 2–4 sentence summary explaining the most important reasons behind the scores. The Verdict Score must be consistent with the three component scores: a low Evidence Strength or Purchasing Confidence should pull the overall verdict down, and the recommendation label must match the Verdict Score band.
 
 ---
 

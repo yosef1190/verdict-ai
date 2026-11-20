@@ -1,10 +1,19 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
+import Link from "next/link";
 import { supabase } from "@/lib/supabase";
 
 type Status = { version: string; engines: string[]; ai_ready: boolean; scrape_ready: boolean };
 type Report = { title: string; markdown: string; html: string };
 type Step = { text: string; done: boolean };
+type Mode = "light" | "medium" | "deep";
+type Wallet = { subscription_credits: number; purchased_credits: number; total: number; free_light_available: boolean };
+
+const MODES: { id: Mode; name: string; desc: string; time: string; queries: string }[] = [
+  { id: "light", name: "Light", desc: "Identity check, key reviews, main complaints, basic credibility.", time: "under 5 min", queries: "3 searches" },
+  { id: "medium", name: "Medium", desc: "Everything in Light, plus community discussion and claims vs reality.", time: "under 10 min", queries: "4 searches" },
+  { id: "deep", name: "Deep", desc: "Everything in Medium, plus safety, warranty, testing and alternatives.", time: "under 15 min", queries: "5 searches" },
+];
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -26,9 +35,13 @@ export default function Research() {
   const [engine, setEngine] = useState("yahoo");
   const [render, setRender] = useState(false);
   const [noAi, setNoAi] = useState(false);
+  const [mode, setMode] = useState<Mode>("light");
   const [status, setStatus] = useState<Status | null>(null);
+  const [wallet, setWallet] = useState<Wallet | null>(null);
+  const [costs, setCosts] = useState<Record<string, number>>({ light: 1, medium: 2, deep: 3 });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [needsCredits, setNeedsCredits] = useState(false);
   const [steps, setSteps] = useState<Step[]>([]);
   const [report, setReport] = useState<Report | null>(null);
   const [copied, setCopied] = useState<"" | "ok" | "fail">("");
@@ -36,6 +49,11 @@ export default function Research() {
   const articleRef = useRef<HTMLElement>(null);
   const reportRef = useRef<HTMLElement>(null);
   const urlRef = useRef<HTMLInputElement>(null);
+
+  const refreshWallet = async () => {
+    const { res, body } = await api("/api/wallet");
+    if (res.ok) { setWallet(body); if (body.mode_costs) setCosts(body.mode_costs); }
+  };
 
   useEffect(() => {
     alive.current = true;
@@ -47,6 +65,7 @@ export default function Research() {
     api("/api/research/status").then(({ res, body }) => {
       if (alive.current && res.ok) setStatus(body);
     });
+    refreshWallet();
     return () => { alive.current = false; };
   }, []);
 
@@ -83,19 +102,33 @@ export default function Research() {
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     if (busy) return;
-    setError(""); setReport(null); setSteps([]); setBusy(true);
+    const cost = costs[mode] ?? 1;
+    const available = wallet?.total ?? 0;
+    const freeOk = mode === "light" && wallet?.free_light_available;
+    if (!freeOk && available < cost) {
+      setError("");
+      setNeedsCredits(true);
+      return;
+    }
+    setError(""); setNeedsCredits(false); setReport(null); setSteps([]); setBusy(true);
     addStep("Starting");
     try {
       const { res, body } = await api("/api/research", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: url, keywords, focus, engine, render, no_ai: noAi }),
+        body: JSON.stringify({ text: url, keywords, focus, engine, render, no_ai: noAi, mode }),
       });
+      if (res.status === 402) {
+        setNeedsCredits(true);
+        throw new Error(body.error || "You don't have enough credits for this mode.");
+      }
       if (!res.ok) throw new Error(body.error || "Could not start research.");
+      refreshWallet();
       const data = await poll(body.id);
       if (!alive.current) return;
       setSteps((s) => s.map((x) => ({ ...x, done: true })));
       setReport(data);
+      refreshWallet();
     } catch (err: any) {
       if (!alive.current) return;
       setSteps([]);
@@ -127,6 +160,13 @@ export default function Research() {
   }
 
   const engines = status?.engines?.length ? status.engines : ["yahoo"];
+  const cost = costs[mode] ?? 1;
+  const sub = wallet?.subscription_credits ?? 0;
+  const bought = wallet?.purchased_credits ?? 0;
+  const total = wallet?.total ?? 0;
+  const freeEligible = mode === "light" && !!wallet?.free_light_available;
+  const after = freeEligible ? total : Math.max(0, total - cost);
+  const blocked = !freeEligible && total < cost;
 
   return (
     <div className="rs">
@@ -138,13 +178,44 @@ export default function Research() {
       )}
 
       <form className="rs-card" onSubmit={submit} autoComplete="off">
+        <p className="mono small" style={{ marginBottom: 10 }}>01 — Choose research depth</p>
+        <div className="modes" role="radiogroup" aria-label="Research depth">
+          {MODES.map((m) => (
+            <button
+              key={m.id} type="button" role="radio" aria-checked={mode === m.id}
+              className={`mode${mode === m.id ? " on" : ""}`}
+              onClick={() => { setMode(m.id); setNeedsCredits(false); }}
+              disabled={busy}
+            >
+              <span className="name">{m.name}<span className="cost">{costs[m.id] ?? 1} cr</span></span>
+              <span className="meta">{m.time} · {m.queries}</span>
+              <span className="desc">{m.desc}</span>
+            </button>
+          ))}
+        </div>
+
+        <div className="bal">
+          <span>Subscription <b>{sub}</b></span><span className="sep">·</span>
+          <span>Purchased <b>{bought}</b></span><span className="sep">·</span>
+          {freeEligible
+            ? <span>This Light run is <b>free</b> (one per account)</span>
+            : <span>After this run <b>{after}</b> credit{after === 1 ? "" : "s"}</span>}
+          {!freeEligible && (
+            <span className={`after${blocked ? " low" : ""}`}>{blocked ? "Need more credits" : "—"}</span>
+          )}
+          <Link href="/pricing" className="link-btn" style={{ marginLeft: 8 }}>Buy credits</Link>
+        </div>
+
+        <p className="mono small" style={{ margin: "22px 0 10px" }}>02 — Paste the product</p>
         <div className="rs-row">
           <label className="input rs-url">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M10 14a4 4 0 005.7 0l3-3a4 4 0 00-5.7-5.7l-1 1M14 10a4 4 0 00-5.7 0l-3 3a4 4 0 005.7 5.7l1-1" /></svg>
             <span className="sr">Product URL</span>
             <input ref={urlRef} type="text" inputMode="url" spellCheck={false} required value={url} onChange={(e) => setUrl(e.target.value)} placeholder="Paste a product link…" />
           </label>
-          <button className="btn dark" type="submit" disabled={busy}>{busy ? "Researching…" : "Get your Verdict"}</button>
+          <button className="btn dark" type="submit" disabled={busy || blocked}>
+            {busy ? "Researching…" : blocked ? "Not enough credits" : `Get your Verdict · ${freeEligible ? "free" : `${cost} cr`}`}
+          </button>
         </div>
         <p className="mono note left">Reads the product page, finds independent reviews and complaints across the web, then scores it from 0 to 100.</p>
 
@@ -165,7 +236,14 @@ export default function Research() {
         </details>
       </form>
 
-      {error && <div className="rs-banner err" role="alert">{error}</div>}
+      {needsCredits && (
+        <div className="rs-banner err" role="alert">
+          This {mode} investigation costs {cost} credit{cost === 1 ? "" : "s"}, and you have {total}.{" "}
+          <Link href="/pricing" style={{ textDecoration: "underline" }}>Buy credits</Link> or pick a cheaper mode.
+        </div>
+      )}
+
+      {error && !needsCredits && <div className="rs-banner err" role="alert">{error}</div>}
 
       {steps.length > 0 && !report && (
         <section className="rs-card rs-progress" aria-live="polite" aria-label="Progress">

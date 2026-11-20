@@ -61,7 +61,7 @@ export default function Home() {
         <div className="wrap nav-in">
           <Logo />
           <nav aria-label="Primary" className="links">
-            <a href="#how">How it works</a><a href="#analyze">What we analyze</a><a href="#report">Example report</a><a href="#why">Why Verdict</a>
+            <a href="#how">How it works</a><a href="#analyze">What we analyze</a><a href="#report">Example report</a><a href="/pricing">Pricing</a><a href="#why">Why Verdict</a>
           </nav>
           <NavAuth />
         </div>

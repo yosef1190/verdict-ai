@@ -1,4 +1,10 @@
-"""Environment-driven configuration."""
+"""Environment-driven configuration.
+
+The pricing configuration lives here as server-side defaults.
+All price calculations happen server-side; the frontend must never
+submit or override prices. See PRICING dict and the pricing_config()
+helper for details.
+"""
 
 from __future__ import annotations
 
@@ -93,6 +99,74 @@ class Settings:
     timeout: int = 120
     max_workers: int = 3
     report_dir: Path = PROJECT_ROOT / "reports"
+
+    # Server-side pricing configuration - all prices calculated server-side,
+    # never trusted from the frontend. This dict is the single source of
+    # truth for plan pricing, credit costs, and feature flags.
+    PRICING: dict = field(
+        default_factory=lambda: {
+            # FREE plan: one complimentary Light investigation per eligible account
+            "free": {
+                "monthly_cost": 0,
+                "credits": 0,
+                "min_purchase": 0,
+                "pricing_tiers": {},
+                "features": [
+                    "one_complimentary_light",
+                    "basic_score",
+                    "basic_report",
+                    "limited_history",
+                    "access_basic_functionality",
+                ],
+            },
+            # PAY-AS-YOU-GO: one-time credit purchases, no recurring
+            "pay_as_you_go": {
+                "monthly_cost": 0,
+                "credits": 0,
+                "min_purchase": 5,
+                "pricing_tiers": {"5": 1.00, "10": 0.85, "25": 0.70, "50": 0.60, "100": 0.50},
+                "features": [
+                    "no_recurring",
+                    "quantity_discounts",
+                    "never_expire",
+                    "refund_failed",
+                    "buy_extra_anytime",
+                ],
+            },
+            # RESEARCH Pro: monthly or annual subscription with monthly credit allowance
+            "research_pro": {
+                "monthly_cost": 14.99,
+                "annual_cost": 149.99,
+                "monthly_credits": 50,
+                "annual_credits_per_month": 50,
+                "features": [
+                    "light_1cr",
+                    "medium_2cr",
+                    "deep_3cr",
+                    "full_light_medium_deep",
+                    "evidence_reports",
+                    "saved_history",
+                    "priority_processing",
+                    "buy_extra_credits",
+                ],
+            },
+            # BUSINESS: monthly or annual subscription with higher credit allowance
+            "business": {
+                "monthly_cost": 29.99,
+                "annual_cost": 299.99,
+                "monthly_credits": 150,
+                "annual_credits_per_month": 150,
+                "features": [
+                    "bulk_investigations",
+                    "advanced_comparisons",
+                    "exportable_reports",
+                    "advanced_controls",
+                    "even_priority",
+                    "buy_extra_credits",
+                ],
+            },
+        }
+    )
 
     @classmethod
     def from_env(

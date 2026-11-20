@@ -25,6 +25,7 @@ export default function Dashboard() {
         <div className="wrap nav-in">
           <Logo />
           <div className="auth">
+            <a className="btn ghost sm" href="/pricing">Plan &amp; credits</a>
             {user.user_metadata?.avatar_url
               ? <img className="avatar" src={user.user_metadata.avatar_url} alt="" referrerPolicy="no-referrer" />
               : <span className="avatar ph" aria-hidden="true">{name[0]?.toUpperCase()}</span>}

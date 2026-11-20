@@ -7,3 +7,4 @@ flask>=3.0
 markdown-it-py>=3.0
 gunicorn
 supabase
+stripe>=11.0

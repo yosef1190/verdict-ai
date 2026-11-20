@@ -72,6 +72,11 @@ def recommendation_labels() -> str:
 
 
 _SCORE = re.compile(r"Verdict\s+Score\s*:?\s*\**\s*(\d{1,3})(?:\.\d+)?\s*\**\s*/\s*100", re.I)
+_CREDIBILITY = re.compile(r"Product\s+Credibility\s*:?\s*\**\s*(\d{1,3})(?:\.\d+)?\s*\**\s*/\s*100", re.I)
+_EVIDENCE = re.compile(r"Evidence\s+Strength\s*:?\s*\**\s*(\d{1,3})(?:\.\d+)?\s*\**\s*/\s*100", re.I)
+_PURCHASE_CONFIDENCE = re.compile(
+    r"Purchasing\s+Confidence\s*:?\s*\**\s*(\d{1,3})(?:\.\d+)?\s*\**\s*/\s*100", re.I
+)
 _RECOMMENDATION_LINE = re.compile(r"^[ \t]*\**[ \t]*Recommendation\s*:.*$", re.I | re.M)
 _FINAL_VERDICT = re.compile(
     r"(\*\*Verdict:\s*)[^\n—–-]*?(\s*[—–-]\s*)(\d{1,3})(\s*/\s*100\*\*)", re.I
@@ -83,6 +88,38 @@ def find_score(markdown: str) -> int | None:
     if not match:
         return None
     return max(0, min(100, int(match.group(1))))
+
+
+def find_product_credibility(markdown: str) -> int | None:
+    match = _CREDIBILITY.search(markdown)
+    if not match:
+        return None
+    return max(0, min(100, int(match.group(1))))
+
+
+def find_evidence_strength(markdown: str) -> int | None:
+    match = _EVIDENCE.search(markdown)
+    if not match:
+        return None
+    return max(0, min(100, int(match.group(1))))
+
+
+def find_purchasing_confidence(markdown: str) -> int | None:
+    match = _PURCHASE_CONFIDENCE.search(markdown)
+    if not match:
+        return None
+    return max(0, min(100, int(match.group(1))))
+
+
+def extract_scores(markdown: str) -> dict[str, int | None]:
+    """Return the four scores found in a report (None when absent)."""
+
+    return {
+        "verdict": find_score(markdown),
+        "product_credibility": find_product_credibility(markdown),
+        "evidence_strength": find_evidence_strength(markdown),
+        "purchasing_confidence": find_purchasing_confidence(markdown),
+    }
 
 
 def apply_score_bands(markdown: str) -> str:
