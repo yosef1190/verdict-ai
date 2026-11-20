@@ -35,7 +35,7 @@ async function api(path: string, init: RequestInit = {}) {
   return { res, body };
 }
 
-const money = (n: number) => `$${n.toFixed(2)}`;
+const money = (n: number | null | undefined) => `$${(n ?? 0).toFixed(2)}`;
 
 export default function PricingPage() {
   const { user } = useAuth();
