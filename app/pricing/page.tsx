@@ -242,7 +242,7 @@ export default function PricingPage() {
           </div>
           <div className="calc-out">
             <p className="kicker mono">Your total</p>
-            <p className="total">{quote ? money(quote.total_cents) : "—"}</p>
+            <p className="total">{quote ? money((quote.total_cents ?? 0) / 100) : "—"}</p>
             <p className="per">{quote ? `${money(quote.unit_price)} per credit` : "Enter a quantity"}</p>
             <div className="rows">
               <div><span>Credits</span><b>{quote?.quantity ?? qty}</b></div>
