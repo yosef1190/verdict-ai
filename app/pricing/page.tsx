@@ -6,7 +6,7 @@ import { supabase } from "@/lib/supabase";
 import Logo from "@/components/Logo";
 import { NavAuth } from "@/components/AuthButtons";
 
-type Tier = { quantity: number; unit_price: number; total: number };
+type Tier = { quantity: number; unit_price: number; total_cents: number; total: number };
 type Plan = {
   monthly_cost: number;
   annual_cost?: number;
@@ -242,7 +242,7 @@ export default function PricingPage() {
           </div>
           <div className="calc-out">
             <p className="kicker mono">Your total</p>
-            <p className="total">{quote ? money(quote.total) : "—"}</p>
+            <p className="total">{quote ? money(quote.total_cents) : "—"}</p>
             <p className="per">{quote ? `${money(quote.unit_price)} per credit` : "Enter a quantity"}</p>
             <div className="rows">
               <div><span>Credits</span><b>{quote?.quantity ?? qty}</b></div>
