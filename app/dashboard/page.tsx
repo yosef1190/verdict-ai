@@ -12,12 +12,22 @@ export default function Dashboard() {
   const { user, loading, signOut } = useAuth();
   const router = useRouter();
   const [wallet, setWallet] = useState<{ subscription_credits: number; purchased_credits: number } | null>(null);
+  const [checkout, setCheckout] = useState<'success' | 'canceled' | null>(null);
 
   useEffect(() => {
     if (!loading && !user) router.replace("/login");
   }, [user, loading, router]);
 
   if (loading || !user) return null;
+
+  // Handle checkout redirect results from URL search params
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const kind = params.get("kind");
+    if (kind === "subscription") {
+      setCheckout(params.get("type") === "success" ? "success" : "canceled");
+    }
+  }, []);
 
   const name = user.user_metadata?.full_name ?? user.email?.split("@")[0] ?? "Account";
 
@@ -42,7 +52,7 @@ export default function Dashboard() {
         <div className="wrap nav-in">
           <Logo />
           <div className="auth">
-            <a className="btn ghost sm" href="/pricing">Plan &amp; credits</a>
+            <a className="btn ghost sm" href="/pricing">Plan & credits</a>
             {user.user_metadata?.avatar_url
               ? <img className="avatar" src={user.user_metadata.avatar_url} alt="" referrerPolicy="no-referrer" />
               : <span className="avatar ph" aria-hidden="true">{name[0]?.toUpperCase()}</span>}
@@ -80,10 +90,21 @@ export default function Dashboard() {
               </div>
             )}
           </div>
+          {checkout && (
+            <div className="billing-actions">
+              {checkout === "success" ? (
+                <p className="muted">Subscription active! Your monthly credits have been refreshed.</p>
+              ) : (
+                <p className="muted">Subscription canceled. Your purchased credits remain.</p>
+              )}</div>
+          )}
           <div className="billing-actions">
             <button className="btn light" onClick={() => router.push("/pricing")}>Manage subscription</button>
           </div>
         </section>
+        <nav className="wallet-nav">
+          <a href="/wallet" className="btn subtle">Wallet</a>
+        </nav>
       </main>
     </>
   );
