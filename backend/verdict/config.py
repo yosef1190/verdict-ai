@@ -124,7 +124,7 @@ class Settings:
                 "monthly_cost": 0,
                 "credits": 0,
                 "min_purchase": 5,
-                "pricing_tiers": {"5": 1.00, "10": 0.85, "25": 0.70, "50": 0.60, "100": 0.50},
+                "pricing_tiers": {"5": 1.00, "10": 0.90, "25": 0.80, "50": 0.75, "100": 0.75},
                 "features": [
                     "no_recurring",
                     "quantity_discounts",

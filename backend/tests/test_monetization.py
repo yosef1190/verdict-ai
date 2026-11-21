@@ -20,7 +20,7 @@ from verdict.wallet import calculate_price
 
 @pytest.mark.parametrize(
     "quantity,expected_total,expected_unit",
-    [(5, 500, 1.00), (10, 850, 0.85), (25, 1750, 0.70), (50, 3000, 0.60), (100, 5000, 0.50)],
+    [(5, 500, 1.00), (10, 900, 0.90), (25, 2000, 0.80), (50, 3750, 0.75), (100, 7500, 0.75)],
 )
 def test_pay_as_you_go_tiers(quantity, expected_total, expected_unit):
     quote = calculate_price("pay_as_you_go", quantity=quantity)
@@ -205,7 +205,7 @@ def test_pricing_endpoint_is_public(client):
 def test_quote_endpoint_ignores_frontend_price(client):
     res = client.post("/api/pricing/quote", json={"plan": "pay_as_you_go", "quantity": 50, "total_cents": 1})
     assert res.status_code == 200
-    assert res.get_json()["total_cents"] == 3000
+    assert res.get_json()["total_cents"] == 3750
 
 
 def test_wallet_requires_login(client):
