@@ -18,8 +18,6 @@ export default function Dashboard() {
     if (!loading && !user) router.replace("/login");
   }, [user, loading, router]);
 
-  if (loading || !user) return null;
-
   // Handle checkout redirect results from URL search params
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -29,10 +27,9 @@ export default function Dashboard() {
     }
   }, []);
 
-  const name = user.user_metadata?.full_name ?? user.email?.split("@")[0] ?? "Account";
-
   // Fetch wallet data
   useEffect(() => {
+    if (loading || !user) return;
     const fetchWallet = async () => {
       const { data: { session} } = await supabase.auth.getSession();
       if (session) {
@@ -44,7 +41,11 @@ export default function Dashboard() {
       }
     };
     fetchWallet();
-  }, []);
+  }, [loading, user]);
+
+  if (loading || !user) return null;
+
+  const name = user.user_metadata?.full_name ?? user.email?.split("@")[0] ?? "Account";
 
   return (
     <>

@@ -33,11 +33,9 @@ export default function Wallet() {
     return () => clearInterval(interval);
   }, []);
 
-  if (authLoading || !authUser) return null;
-
   // Fetch wallet data
   useEffect(() => {
-    if (!session) return;
+    if (authLoading || !authUser || !session) return;
     const fetchData = async () => {
       const res = await fetch(`${process.env.NEXT_PUBLIC_URL || "http://localhost:3000"}/api/wallet`, {
         headers: { Authorization: `Bearer ${session.access_token}` },
@@ -46,11 +44,11 @@ export default function Wallet() {
       if (res.ok) setWallet(await res.json());
     };
     fetchData();
-  }, [session]);
+  }, [authLoading, authUser, session]);
 
   // Fetch transactions
   useEffect(() => {
-    if (!session) return;
+    if (authLoading || !authUser || !session) return;
     const fetchTransactions = async () => {
       const res = await fetch(`${process.env.NEXT_PUBLIC_URL || "http://localhost:3000"}/api/transactions`, {
         headers: { Authorization: `Bearer ${session.access_token}` },
@@ -59,7 +57,7 @@ export default function Wallet() {
       if (res.ok) setTransactions(await res.json());
     };
     fetchTransactions();
-  }, [session]);
+  }, [authLoading, authUser, session]);
 
   // Set loading state when we have data
   useEffect(() => {
@@ -67,6 +65,8 @@ export default function Wallet() {
       setLoadingWallets(false);
     }
   }, [session, wallet, transactions]);
+
+  if (authLoading || !authUser) return null;
 
   // Only render when we have session and wallet data
   if (!session || wallet == null) return null;
