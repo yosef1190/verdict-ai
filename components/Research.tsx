@@ -2,6 +2,8 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { supabase } from "@/lib/supabase";
+import ReportView from "@/components/report/ReportView";
+import ReportSkeleton from "@/components/report/ReportSkeleton";
 
 type Status = { version: string; engines: string[]; ai_ready: boolean; scrape_ready: boolean };
 type Report = { title: string; markdown: string; html: string };
@@ -46,8 +48,7 @@ export default function Research() {
   const [report, setReport] = useState<Report | null>(null);
   const [copied, setCopied] = useState<"" | "ok" | "fail">("");
   const alive = useRef(true);
-  const articleRef = useRef<HTMLElement>(null);
-  const reportRef = useRef<HTMLElement>(null);
+  const reportRef = useRef<HTMLDivElement>(null);
   const urlRef = useRef<HTMLInputElement>(null);
 
   const refreshWallet = async () => {
@@ -69,12 +70,7 @@ export default function Research() {
     return () => { alive.current = false; };
   }, []);
 
-  // Report HTML is rendered server-side with raw HTML disabled; just harden the links.
   useEffect(() => {
-    articleRef.current?.querySelectorAll("a").forEach((a) => {
-      a.target = "_blank";
-      a.rel = "noopener noreferrer nofollow";
-    });
     if (report) reportRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
   }, [report]);
 
@@ -157,6 +153,14 @@ export default function Research() {
     setReport(null); setSteps([]); setUrl("");
     window.scrollTo({ top: 0, behavior: "smooth" });
     urlRef.current?.focus();
+  }
+
+  function deep() {
+    setMode("deep");
+    setReport(null);
+    setSteps([]);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+    setTimeout(() => urlRef.current?.focus(), 350);
   }
 
   const engines = status?.engines?.length ? status.engines : ["yahoo"];
@@ -245,24 +249,20 @@ export default function Research() {
 
       {error && !needsCredits && <div className="rs-banner err" role="alert">{error}</div>}
 
-      {steps.length > 0 && !report && (
-        <section className="rs-card rs-progress" aria-live="polite" aria-label="Progress">
-          <ol>{steps.map((s, i) => <li key={i} className={s.done ? "done" : "current"}>{s.text}</li>)}</ol>
-        </section>
-      )}
+      {busy && !report && <ReportSkeleton steps={steps.map((step) => step.text)} />}
 
       {report && (
-        <section className="rs-card" ref={reportRef}>
-          <div className="rs-bar">
-            <strong className="serif">{report.title || "Verdict research report"}</strong>
-            <div className="rs-actions">
-              <button className="btn ghost sm" type="button" onClick={copy}>{copied === "ok" ? "Copied" : copied === "fail" ? "Copy failed" : "Copy Markdown"}</button>
-              <button className="btn ghost sm" type="button" onClick={download}>Download .md</button>
-              <button className="btn dark sm" type="button" onClick={again}>New research</button>
-            </div>
-          </div>
-          <article className="rs-report" ref={articleRef} dangerouslySetInnerHTML={{ __html: report.html }} />
-        </section>
+        <div ref={reportRef}>
+          <ReportView
+            markdown={report.markdown}
+            title={report.title || "Verdict research report"}
+            copied={copied}
+            onCopy={copy}
+            onDownload={download}
+            onNewResearch={again}
+            onDeep={deep}
+          />
+        </div>
       )}
     </div>
   );
