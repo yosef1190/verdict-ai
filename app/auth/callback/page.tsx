@@ -11,5 +11,13 @@ export default function AuthCallback() {
     if (loading) return;
     router.replace(user ? "/dashboard" : "/login");
   }, [user, loading, router]);
-  return null;
+  return (
+    <div className="auth-shell">
+      <main className="auth-main">
+        <div className="auth-card">
+          <p className="muted sub">Finishing sign-in…</p>
+        </div>
+      </main>
+    </div>
+  );
 }

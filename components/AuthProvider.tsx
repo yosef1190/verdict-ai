@@ -37,11 +37,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     // Listen for session changes
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange((event, session) => {
+    } =     supabase.auth.onAuthStateChange((event, session) => {
       setUser(session?.user ?? null);
       setLoading(false);
-      
-      if (event === "SIGNED_OUT") {
+
+      if (event === "SIGNED_IN" || event === "TOKEN_REFRESHED" || event === "SIGNED_OUT") {
         setError(null);
       }
     });
@@ -54,12 +54,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const signInWithGoogle = useCallback(async () => {
     setError(null);
     try {
-      await supabase.auth.signInWithOAuth({
+      const { error: oauthError } = await supabase.auth.signInWithOAuth({
         provider: "google",
         options: {
-          redirectTo: `${process.env.NEXT_PUBLIC_URL || "http://localhost:3000"}/auth/callback`,
+          redirectTo: `${window.location.origin}/auth/callback`,
         },
       });
+      if (oauthError) throw oauthError;
     } catch (e: any) {
       setError(e.message || "Google sign-in failed");
       throw e;

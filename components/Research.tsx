@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { supabase } from "@/lib/supabase";
+import { getAccessToken } from "@/lib/supabase";
 import ReportView from "@/components/report/ReportView";
 import ReportSkeleton from "@/components/report/ReportSkeleton";
 
@@ -20,8 +20,7 @@ const MODES: { id: Mode; name: string; desc: string; time: string; queries: stri
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 async function api(path: string, init: RequestInit = {}) {
-  const { data } = await supabase.auth.getSession();
-  const token = data.session?.access_token;
+  const token = await getAccessToken();
   const res = await fetch(path, {
     ...init,
     headers: { ...(init.headers || {}), ...(token ? { Authorization: `Bearer ${token}` } : {}) },

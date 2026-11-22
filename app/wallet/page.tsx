@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/components/AuthProvider";
 import Logo from "@/components/Logo";
-import { supabase } from "@/lib/supabase";
+import { getAccessToken } from "@/lib/supabase";
 
 type ModeCosts = { light: number; medium: number; deep: number };
 type Summary = {
@@ -95,8 +95,7 @@ const TYPES = [
 const STATUSES = ["completed", "pending", "failed", "reversed"] as const;
 
 async function api(path: string, init: RequestInit = {}) {
-  const { data } = await supabase.auth.getSession();
-  const token = data.session?.access_token;
+  const token = await getAccessToken();
   const res = await fetch(path, {
     ...init,
     headers: { ...(init.headers || {}), ...(token ? { Authorization: `Bearer ${token}` } : {}) },

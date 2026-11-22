@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { supabase } from "@/lib/supabase";
+import { getAccessToken } from "@/lib/supabase";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/components/AuthProvider";
 import Logo from "@/components/Logo";
@@ -31,10 +31,10 @@ export default function Dashboard() {
   useEffect(() => {
     if (loading || !user) return;
     const fetchWallet = async () => {
-      const { data: { session} } = await supabase.auth.getSession();
-      if (session) {
-        const res = await fetch(`${process.env.NEXT_PUBLIC_URL || "http://localhost:3000"}/api/wallet`, {
-          headers: { Authorization: `Bearer ${session.access_token}` },
+      const token = await getAccessToken();
+      if (token) {
+        const res = await fetch("/api/wallet", {
+          headers: { Authorization: `Bearer ${token}` },
           cache: "no-store",
         });
         if (res.ok) setWallet(await res.json());

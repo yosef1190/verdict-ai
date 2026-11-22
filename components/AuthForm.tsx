@@ -17,8 +17,9 @@ const GoogleG = () => (
 );
 
 export default function AuthForm({ mode }: { mode: "signin" | "signup" }) {
-  const { user, loading, signInWithGoogle, signOut } = useAuth();
+  const { user, loading, signInWithGoogle } = useAuth();
   const router = useRouter();
+  const isSignup = mode === "signup";
 
   useEffect(() => { 
     if (user && !loading) router.replace("/dashboard"); 
@@ -36,9 +37,9 @@ export default function AuthForm({ mode }: { mode: "signin" | "signup" }) {
       </header>
       <main className="auth-main">
         <div className="auth-card">
-          <h1 className="serif">Log in to Verdict</h1>
-          <p className="muted sub">Welcome back.</p>
-          <button type="button" className="btn light wide" onClick={signInWithGoogle} disabled={loading}><GoogleG /> Continue with Google</button>
+          <h1 className="serif">{isSignup ? "Create your Verdict account" : "Log in to Verdict"}</h1>
+          <p className="muted sub">{isSignup ? "Start with one free Light investigation." : "Welcome back."}</p>
+          <button type="button" className="btn light wide" onClick={signInWithGoogle} disabled={loading}><GoogleG /> {isSignup ? "Sign up with Google" : "Continue with Google"}</button>
         </div>
       </main>
     </div>

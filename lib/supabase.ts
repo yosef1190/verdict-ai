@@ -23,7 +23,7 @@ export async function signInWithGoogle() {
   const { error } = await supabase.auth.signInWithOAuth({
     provider: "google",
     options: {
-      redirectTo: `${process.env.NEXT_PUBLIC_URL || "http://localhost:3000"}/auth/callback`,
+      redirectTo: `${window.location.origin}/auth/callback`,
       // prompt: "select_account", // forces account selection each time
     },
   });
@@ -43,6 +43,13 @@ export async function signOut() {
 export async function getSession() {
   const { data: { session } } = await supabase.auth.getSession();
   return session;
+}
+
+export async function getAccessToken() {
+  const { data } = await supabase.auth.getSession();
+  if (data.session?.access_token) return data.session.access_token;
+  const { data: refreshed } = await supabase.auth.refreshSession();
+  return refreshed.session?.access_token ?? null;
 }
 
 /**
