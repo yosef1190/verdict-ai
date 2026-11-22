@@ -47,6 +47,13 @@ class PaymentNotConfigured(Exception):
     """Raised when a checkout is requested but Stripe is not set up."""
 
 
+def _field(obj: Any, name: str, default: Any = None) -> Any:
+    """Read a field from a Stripe object or a plain dict."""
+    if isinstance(obj, dict):
+        return obj.get(name, default)
+    return getattr(obj, name, default)
+
+
 class PaymentService:
     """Thin wrapper around Stripe with explicit configuration checks."""
 
@@ -175,6 +182,57 @@ class PaymentService:
             cancel_url=f"{self.app_url}/pricing?checkout=canceled",
         )
         return CheckoutResult(url=session.url, session_id=session.id)
+
+
+    def subscription_state(self, subscription: Any) -> dict[str, Any]:
+        """The small, safe subset of a Stripe subscription the backend needs."""
+        items = _field(subscription, "items")
+        price_id = ""
+        try:
+            data = _field(items, "data") or []
+            if data:
+                price = _field(data[0], "price") or {}
+                price_id = str(_field(price, "id") or "")
+        except Exception:  # noqa: BLE001 - defensive: subscription shapes vary
+            price_id = ""
+        return {
+            "id": str(_field(subscription, "id") or ""),
+            "customer": str(_field(subscription, "customer") or ""),
+            "status": str(_field(subscription, "status") or ""),
+            "cancel_at_period_end": bool(_field(subscription, "cancel_at_period_end", False)),
+            "current_period_start": _field(subscription, "current_period_start"),
+            "current_period_end": _field(subscription, "current_period_end"),
+            "canceled_at": _field(subscription, "canceled_at"),
+            "price_id": price_id,
+            "metadata": _field(subscription, "metadata") or {},
+        }
+
+    def retrieve_subscription(self, subscription_id: str) -> dict[str, Any]:
+        if not self._configured:
+            raise PaymentNotConfigured("Payments are not configured yet.")
+        return self.subscription_state(_stripe.Subscription.retrieve(subscription_id))
+
+    def create_billing_portal(self, customer_id: str, return_url: str) -> CheckoutResult:
+        """Stripe-hosted portal for changing card, plan and billing details."""
+        if not self._configured or not customer_id:
+            raise PaymentNotConfigured(
+                "Billing management is not available for this account yet."
+            )
+        session = _stripe.billing_portal.Session.create(
+            customer=customer_id,
+            return_url=return_url or f"{self.app_url}/wallet",
+        )
+        return CheckoutResult(url=session.url, session_id=session.id)
+
+    def cancel_subscription(self, subscription_id: str) -> dict[str, Any]:
+        """Cancel at period end. Access and credits stay until the period ends."""
+        if not self._configured:
+            raise PaymentNotConfigured("Payments are not configured yet.")
+        if not subscription_id:
+            raise PaymentNotConfigured("No Stripe subscription is linked to this account.")
+        return self.subscription_state(
+            _stripe.Subscription.modify(subscription_id, cancel_at_period_end=True)
+        )
 
     # ------------------------------------------------------------------ webhooks
 

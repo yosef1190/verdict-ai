@@ -18,6 +18,8 @@ def client():
     svc._reservations.clear()
     svc._refunded.clear()
     svc._granted_refs.clear()
+    svc._ledger_rows.clear()
+    web_module._webhook_events.clear()
     app = web_module.create_app(Settings(oxylabs_api_key="x", openrouter_api_key="y"))
     app.config["TESTING"] = True
     return app.test_client()
@@ -184,14 +186,19 @@ def _post_event(client, monkeypatch, event):
     )
 
 
-def _credit_purchase_event(session_id="cs_test_1", quantity=25, user="wh-user"):
+def _credit_purchase_event(session_id="cs_test_1", quantity=25, user="wh-user", total_cents="2000"):
     return {
         "type": "checkout.session.completed",
         "data": {
             "object": {
                 "id": session_id,
                 "client_reference_id": user,
-                "metadata": {"kind": "credits", "user_id": user, "quantity": str(quantity)},
+                "metadata": {
+                    "kind": "credits",
+                    "user_id": user,
+                    "quantity": str(quantity),
+                    "total_cents": total_cents,
+                },
             }
         },
     }
@@ -269,6 +276,92 @@ def test_webhook_cancellation_keeps_purchased_credits(client, monkeypatch):
     # Cancellation stops future grants; credits already bought remain.
     wallet = client.get("/api/wallet", headers=headers).get_json()
     assert wallet["purchased_credits"] == 12
+    assert wallet["subscription_credits"] == 0
+
+
+def test_wallet_exposes_real_ledger_summary(client, monkeypatch):
+    headers = {"X-User-Id": "overview-user"}
+    _post_event(
+        client,
+        monkeypatch,
+        _credit_purchase_event(session_id="cs_overview", quantity=12, user="overview-user"),
+    )
+    body = client.get("/api/wallet", headers=headers).get_json()
+    assert body["total"] == 12
+    assert body["summary"]["purchased_total"] == 12
+    assert body["subscription"] is None
+    assert body["researches_completed"] == 0
+
+
+def test_transactions_are_filterable_and_paginated(client, monkeypatch):
+    headers = {"X-User-Id": "tx-user"}
+    _post_event(client, monkeypatch, _credit_purchase_event(user="tx-user"))
+    page = client.get("/api/transactions?limit=1", headers=headers).get_json()
+    assert page["total"] == 1
+    assert len(page["transactions"]) == 1
+    assert page["transactions"][0]["category"] == "credit_purchase"
+    assert page["transactions"][0]["amount_cents"] == 2000
+    filtered = client.get("/api/transactions?type=refund", headers=headers).get_json()
+    assert filtered["total"] == 0
+    searched = client.get("/api/transactions?q=credit", headers=headers).get_json()
+    assert searched["total"] == 1
+
+
+def test_cancel_at_period_end_keeps_credits_until_deletion(client, monkeypatch):
+    headers = {"X-User-Id": "later-user"}
+    _post_event(
+        client,
+        monkeypatch,
+        {
+            "type": "checkout.session.completed",
+            "data": {
+                "object": {
+                    "id": "cs_later",
+                    "client_reference_id": "later-user",
+                    "metadata": {
+                        "kind": "subscription",
+                        "user_id": "later-user",
+                        "plan": "research_pro",
+                        "interval": "monthly",
+                    },
+                }
+            },
+        },
+    )
+    assert client.get("/api/wallet", headers=headers).get_json()["subscription_credits"] == 50
+
+    _post_event(
+        client,
+        monkeypatch,
+        {
+            "id": "evt_update",
+            "type": "customer.subscription.updated",
+            "data": {
+                "object": {
+                    "id": "sub_later",
+                    "status": "active",
+                    "cancel_at_period_end": True,
+                    "current_period_end": 4102444800,
+                    "metadata": {"user_id": "later-user"},
+                }
+            },
+        },
+    )
+    wallet = client.get("/api/wallet", headers=headers).get_json()
+    assert wallet["subscription_credits"] == 50
+
+
+def test_subscription_management_requires_a_linked_subscription(client):
+    assert client.post("/api/subscription/portal", headers=AUTH).status_code == 400
+    assert client.post("/api/subscription/cancel", headers=AUTH).status_code == 400
+
+
+def test_credit_allocation_cron_requires_secret(client, monkeypatch):
+    monkeypatch.setattr(web_module, "CRON_SECRET", "cron-secret")
+    assert client.post("/api/subscriptions/allocate").status_code == 401
+    assert client.post(
+        "/api/subscriptions/allocate", headers={"X-Cron-Secret": "cron-secret"}
+    ).status_code == 200
 
 
 def test_subscription_checkout_accepts_annual_boolean(client):

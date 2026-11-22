@@ -6,5 +6,6 @@ export const dynamic = "force-dynamic";
 export async function GET(req: Request) {
   const user = await requireUser(req);
   if (!user) return unauthorized();
-  return relay("/api/transactions", { user });
+  const query = new URL(req.url).searchParams.toString();
+  return relay(`/api/transactions${query ? `?${query}` : ""}`, { user });
 }

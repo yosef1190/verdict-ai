@@ -57,6 +57,7 @@ class CreditService:
         # (type, payment_reference) pairs already granted, mirroring the unique
         # ledger check the database path relies on.
         self._granted_refs: set[tuple[str, str]] = set()
+        self._ledger_rows: dict[str, list[dict]] = {}
 
     # ---------------------------------------------------------------- wallets
 
@@ -507,23 +508,31 @@ class CreditService:
         payment_reference: str | None = None,
         balance_before: int = 0,
         balance_after: int = 0,
+        amount_cents: int | None = None,
+        description: str | None = None,
+        reference_type: str | None = None,
     ) -> None:
+        row = {
+            "user_id": user_id,
+            "type": type,
+            "amount": amount,
+            "mode": mode,
+            "investigation_id": investigation_id,
+            "payment_reference": payment_reference,
+            "status": "completed",
+            "balance_before": balance_before,
+            "balance_after": balance_after,
+            "amount_cents": amount_cents,
+            "currency": "usd",
+            "description": description,
+            "reference_type": reference_type,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        }
         if self.sb is None:
+            self._ledger_rows.setdefault(user_id, []).append(row)
             return
         try:
-            self.sb.table("credit_transactions").insert(
-                {
-                    "user_id": user_id,
-                    "type": type,
-                    "amount": amount,
-                    "mode": mode,
-                    "investigation_id": investigation_id,
-                    "payment_reference": payment_reference,
-                    "status": "completed",
-                    "balance_before": balance_before,
-                    "balance_after": balance_after,
-                }
-            ).execute()
+            self.sb.table("credit_transactions").insert(row).execute()
         except Exception as exc:  # noqa: BLE001
             logger.warning("Ledger write failed (%s %s): %s", type, user_id, exc)
 
@@ -592,6 +601,217 @@ class CreditService:
             balance_after=wallet.total,
         )
         return True
+
+    def grant_credits(
+        self,
+        user_id: str,
+        amount: int,
+        *,
+        kind: str = "purchased",
+        type: str = "purchase",
+        reference: str | None = None,
+        reset: bool = False,
+        amount_cents: int | None = None,
+        description: str | None = None,
+    ) -> bool:
+        """Idempotently grant credits for a verified Stripe event.
+
+        ``reference`` is a Stripe session, invoice or event id. A reference is
+        only ever granted once, and the database path locks the wallet row so
+        concurrent webhook deliveries cannot allocate twice. Subscription
+        grants can reset the bucket (monthly rollover) or add to it; purchased
+        credits are never touched by a subscription grant.
+        """
+        if amount <= 0 or kind not in ("purchased", "subscription"):
+            return False
+
+        if self.sb is None:
+            with self._lock:
+                key = ("grant", reference or f"{type}:{amount}:{len(self._granted_refs)}")
+                if reference and key in self._granted_refs:
+                    return False
+                self._granted_refs.add(key)
+                wallet = self._wallets.setdefault(user_id, WalletBalance(0, 0))
+                before = wallet.total
+                if kind == "subscription":
+                    wallet.subscription_credits = amount if reset else wallet.subscription_credits + amount
+                else:
+                    wallet.purchased_credits += amount
+            self._ledger(
+                user_id=user_id,
+                type=type,
+                amount=amount,
+                payment_reference=reference,
+                balance_before=before,
+                balance_after=wallet.total,
+                amount_cents=amount_cents,
+                description=description,
+                reference_type="subscription_grant" if kind == "subscription" else type,
+            )
+            return True
+
+        atomic = self._rpc(
+            "verdict_grant_credits",
+            {
+                "p_user_id": user_id,
+                "p_amount": amount,
+                "p_kind": kind,
+                "p_type": type,
+                "p_reference": reference,
+                "p_reset": reset,
+                "p_amount_cents": amount_cents,
+                "p_description": description,
+            },
+        )
+        if atomic is not None:
+            if atomic.get("granted"):
+                logger.info(
+                    "Granted %s %s credits to %s (ref=%s)", amount, kind, user_id, reference
+                )
+            return bool(atomic.get("granted"))
+
+        if reference:
+            try:
+                dup = (
+                    self.sb.table("credit_transactions")
+                    .select("id")
+                    .eq("payment_reference", reference)
+                    .limit(1)
+                    .execute()
+                )
+                if dup.data:
+                    return False
+            except Exception:  # noqa: BLE001
+                pass
+
+        wallet = self.get_wallet(user_id)
+        before = wallet.total
+        if kind == "subscription":
+            wallet.subscription_credits = amount if reset else wallet.subscription_credits + amount
+        else:
+            wallet.purchased_credits += amount
+        self._write_wallet(user_id, wallet)
+        self._ledger(
+            user_id=user_id,
+            type=type,
+            amount=amount,
+            payment_reference=reference,
+            balance_before=before,
+            balance_after=wallet.total,
+            amount_cents=amount_cents,
+            description=description,
+            reference_type="subscription_grant" if kind == "subscription" else type,
+        )
+        return True
+
+    def clear_subscription_credits(self, user_id: str, reference: str) -> bool:
+        """Zero the subscription bucket at real cancellation, never purchases."""
+        wallet = self.get_wallet(user_id)
+        if wallet.subscription_credits == 0:
+            return False
+        cleared = wallet.subscription_credits
+        wallet.subscription_credits = 0
+        self._write_wallet(user_id, wallet)
+        self._ledger(
+            user_id=user_id,
+            type="adjustment",
+            amount=-cleared,
+            payment_reference=reference,
+            balance_before=wallet.total + cleared,
+            balance_after=wallet.total,
+            description="Subscription ended; unused subscription credits expired",
+        )
+        return True
+
+    def wallet_summary(self, user_id: str) -> dict[str, int]:
+        """Lifetime credit totals calculated from the immutable ledger."""
+        if self.sb is None:
+            rows = self._ledger_rows.get(user_id, [])
+        else:
+            try:
+                resp = (
+                    self.sb.table("credit_transactions")
+                    .select("type,amount,status")
+                    .eq("user_id", user_id)
+                    .limit(2000)
+                    .execute()
+                )
+                rows = resp.data or []
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("Failed to summarise ledger for %s: %s", user_id, exc)
+                rows = []
+
+        summary = {
+            "purchased_total": 0,
+            "subscription_total": 0,
+            "free_total": 0,
+            "consumed": 0,
+            "refunded": 0,
+        }
+        for row in rows:
+            amount = int(row.get("amount") or 0)
+            kind = row.get("type")
+            if row.get("status") == "failed":
+                continue
+            if kind == "purchase":
+                summary["purchased_total"] += max(0, amount)
+            elif kind == "subscription_grant":
+                summary["subscription_total"] += max(0, amount)
+            elif kind == "free_grant":
+                summary["free_total"] += max(0, amount)
+            elif kind in ("reservation", "consumption"):
+                summary["consumed"] += max(0, -amount)
+            elif kind == "refund":
+                summary["refunded"] += max(0, amount)
+        return summary
+
+    def search_transactions(
+        self,
+        user_id: str,
+        *,
+        query: str = "",
+        type: str = "",
+        status: str = "",
+        limit: int = 20,
+        offset: int = 0,
+    ) -> tuple[list[dict], int]:
+        """Filtered, paginated ledger rows plus the total matching count."""
+        if self.sb is None:
+            rows = list(reversed(self._ledger_rows.get(user_id, [])))
+            needle = query.strip().lower()
+            if needle:
+                rows = [
+                    row
+                    for row in rows
+                    if needle in str(row.get("description") or "").lower()
+                    or needle in str(row.get("type") or "").lower()
+                    or needle in str(row.get("payment_reference") or "").lower()
+                    or needle in str(row.get("investigation_id") or "").lower()
+                ]
+            if type:
+                rows = [row for row in rows if row.get("type") == type]
+            if status:
+                rows = [row for row in rows if row.get("status") == status]
+            return rows[offset : offset + limit], len(rows)
+
+        filters = self.sb.table("credit_transactions").select("*", count="exact").eq("user_id", user_id)
+        if type:
+            filters = filters.eq("type", type)
+        if status:
+            filters = filters.eq("status", status)
+        if query.strip():
+            escaped = query.strip().replace("%", "").replace(",", "")
+            filters = filters.or_(
+                "description.ilike.%{0}%,type.ilike.%{0}%,payment_reference.ilike.%{0}%,investigation_id.ilike.%{0}%".format(
+                    escaped
+                )
+            )
+        try:
+            resp = filters.order("created_at", desc=True).range(offset, offset + limit - 1).execute()
+            return resp.data or [], int(resp.count or 0)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Failed to search transactions for %s: %s", user_id, exc)
+            return [], 0
 
     def reset_subscription_credits(self, user_id: str, allowance: int) -> None:
         """Reset the subscription bucket at the start of a new billing period.
