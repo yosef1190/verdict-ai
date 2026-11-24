@@ -25,8 +25,17 @@ type Tx = {
 };
 
 async function api(path: string, init: RequestInit = {}) {
-  const { data } = await supabase.auth.getSession();
-  const token = data.session?.access_token;
+  // Get session token for API authentication.
+  // We fetch a fresh session on each call to ensure we have a valid token,
+  // but we handle the case where the session might not be available yet
+  // or has expired by redirecting to login.
+  const { data, error } = await supabase.auth.getSession();
+  if (error || !data?.session?.access_token) {
+    window.location.href = "/login?next=/pricing";
+    return { res: null, body: { error: "Session expired. Please log in again." } };
+  }
+
+  const token = data.session.access_token;
   const res = await fetch(path, {
     ...init,
     headers: { ...(init.headers || {}), ...(token ? { Authorization: `Bearer ${token}` } : {}) },
@@ -48,6 +57,13 @@ export default function PricingPage() {
   const [busy, setBusy] = useState<string>("");
   const [error, setError] = useState("");
 
+  // Clear error when user becomes authenticated
+  useEffect(() => {
+    if (user) {
+      setError("");
+    }
+  }, [user]);
+
   useEffect(() => {
     api("/api/pricing").then(({ res, body }) => { if (res.ok) setPricing(body); });
   }, []);
@@ -63,11 +79,7 @@ export default function PricingPage() {
   const tiers = useMemo(() => pricing?.pay_as_you_go?.tiers ?? [], [pricing]);
 
   const quoteFor = useCallback(async (quantity: number) => {
-    const { res, body } = await api("/api/pricing/quote", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ plan: "pay_as_you_go", quantity }),
-    });
+    const { res, body } = await api("/api/pricing/quote", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ plan: "pay_as_you_go", quantity }) });
     if (res.ok) setQuote(body);
   }, []);
 
