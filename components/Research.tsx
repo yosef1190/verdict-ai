@@ -1,4 +1,5 @@
 "use client";
+import { useAuth } from "@/components/AuthProvider";
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { getAccessToken } from "@/lib/supabase";
@@ -30,6 +31,7 @@ async function api(path: string, init: RequestInit = {}) {
 }
 
 export default function Research() {
+  const { user, loading, signOut } = useAuth();
   const [url, setUrl] = useState("");
   const [keywords, setKeywords] = useState("");
   const [focus, setFocus] = useState("");
@@ -47,6 +49,20 @@ export default function Research() {
   const [report, setReport] = useState<Report | null>(null);
   const [copied, setCopied] = useState<"" | "ok" | "fail">("");
   const alive = useRef(true);
+
+  // Clear error when user becomes authenticated
+  useEffect(() => {
+    if (user) {
+      setError("");
+    }
+  }, [user]);
+
+  // Clear error on mount if user is already available (avoid race condition)
+  useEffect(() => {
+    if (user) {
+      setError("");
+    }
+  }, []);
   const reportRef = useRef<HTMLDivElement>(null);
   const urlRef = useRef<HTMLInputElement>(null);
 
