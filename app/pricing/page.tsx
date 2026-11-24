@@ -64,6 +64,13 @@ export default function PricingPage() {
     }
   }, [user]);
 
+  // Clear error on mount if user is already available (avoid race condition)
+  useEffect(() => {
+    if (user) {
+      setError("");
+    }
+  }, []);
+
   useEffect(() => {
     api("/api/pricing").then(({ res, body }) => {
       if (res && res.ok) setPricing(body);
