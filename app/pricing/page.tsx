@@ -65,14 +65,18 @@ export default function PricingPage() {
   }, [user]);
 
   useEffect(() => {
-    api("/api/pricing").then(({ res, body }) => { if (res.ok) setPricing(body); });
+    api("/api/pricing").then(({ res, body }) => {
+      if (res && res.ok) setPricing(body);
+    });
   }, []);
 
   useEffect(() => {
     if (!user) { setWallet(null); setTxs([]); return; }
-    api("/api/wallet").then(({ res, body }) => { if (res.ok) setWallet(body); });
+    api("/api/wallet").then(({ res, body }) => {
+      if (res && res.ok) setWallet(body);
+    });
     api("/api/transactions").then(({ res, body }) => {
-      if (res.ok) setTxs(Array.isArray(body.transactions) ? body.transactions : []);
+      if (res && res.ok) setTxs(Array.isArray(body.transactions) ? body.transactions : []);
     });
   }, [user]);
 
@@ -80,7 +84,7 @@ export default function PricingPage() {
 
   const quoteFor = useCallback(async (quantity: number) => {
     const { res, body } = await api("/api/pricing/quote", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ plan: "pay_as_you_go", quantity }) });
-    if (res.ok) setQuote(body);
+    if (res && res.ok) setQuote(body);
   }, []);
 
   useEffect(() => {
@@ -100,7 +104,7 @@ export default function PricingPage() {
       body: JSON.stringify({ quantity: qty }),
     });
     setBusy("");
-    if (!res.ok) { setError(body.error || "Checkout is not available yet."); return; }
+    if (!res || !res.ok) { setError(body.error || "Checkout is not available yet."); return; }
     if (body.url) { window.location.href = body.url; return; }
     setError(body.message || body.error || "Checkout is not configured yet.");
   }
@@ -114,7 +118,7 @@ export default function PricingPage() {
       body: JSON.stringify({ plan, annual }),
     });
     setBusy("");
-    if (!res.ok) { setError(body.error || "Checkout is not available yet."); return; }
+    if (!res || !res.ok) { setError(body.error || "Checkout is not available yet."); return; }
     if (body.url) { window.location.href = body.url; return; }
     setError(body.message || body.error || "Checkout is not configured yet.");
   }
