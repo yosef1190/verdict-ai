@@ -51,10 +51,6 @@ function clearPendingCheckout() {
 async function api(path: string, init: RequestInit = {}) {
   const { res, body, error } = await authFetch(path, init);
   if (error) {
-    // If the error is a session expired error, redirect to login
-    if (error === "session_expired") {
-      window.location.href = "/login?next=/pricing";
-    }
     return { res: null, body: { error: "Please log in to continue." }, error };
   }
   return { res, body, error: undefined };
@@ -158,7 +154,14 @@ export default function PricingPage() {
           });
 
       if (error === "no_session" || error === "session_expired" || res?.status === 401) {
-        window.location.href = "/login?next=/pricing";
+        setBusy("");
+        if (user && !loading) {
+          clearPendingCheckout();
+          setError("Your session expired. Sign out and back in, then try checkout again.");
+        } else {
+          savePendingCheckout(action);
+          window.location.href = "/login?next=/pricing";
+        }
         return;
       }
       setBusy("");

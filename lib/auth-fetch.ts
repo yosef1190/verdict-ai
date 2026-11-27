@@ -16,16 +16,18 @@ export async function authFetch(
 ): Promise<{ res: Response | null; body: any; error?: string }> {
   // Step 1: Get the current session
   const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
+  let session = sessionData?.session;
 
-  if (sessionError || !sessionData?.session?.access_token) {
-    // No valid session - redirect to login with return URL
-    // We use a gentle approach: set a flag that the redirect handler will pick up
-    // Instead of hard window.location.href, we throw an error that the
-    // calling code can handle to redirect
+  if (sessionError || !session?.access_token) {
+    const { data: refreshed, error: refreshError } = await supabase.auth.refreshSession();
+    if (!refreshError && refreshed?.session?.access_token) session = refreshed.session;
+  }
+
+  if (!session?.access_token) {
     return { res: null, body: { error: "Please log in to continue." }, error: "no_session" };
   }
 
-  const token = sessionData.session.access_token;
+  const token = session.access_token;
   const headers = new Headers(init.headers);
   if (token) headers.set("Authorization", `Bearer ${token}`);
 
