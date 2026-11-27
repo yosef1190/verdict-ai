@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useAuth } from "@/components/AuthProvider";
-import { supabase } from "@/lib/supabase";
+import { authFetch } from "@/lib/auth-fetch";
 import Logo from "@/components/Logo";
 import { NavAuth } from "@/components/AuthButtons";
 
@@ -25,22 +25,14 @@ type Tx = {
 };
 
 async function api(path: string, init: RequestInit = {}) {
-  // Get session token for API authentication.
-  // We fetch a fresh session on each call to ensure we have a valid token,
-  // but we handle the case where the session might not be available yet
-  // or has expired by redirecting to login.
-  const { data, error } = await supabase.auth.getSession();
-  if (error || !data?.session?.access_token) {
-    window.location.href = "/login?next=/pricing";
-    return { res: null, body: { error: "Session expired. Please log in again." } };
+  const { res, body, error } = await authFetch(path, init);
+  if (error) {
+    // If the error is a session expired error, redirect to login
+    if (error === "session_expired") {
+      window.location.href = "/login?next=/pricing";
+    }
+    return { res: null, body: { error: error || "Session expired. Please log in again." } };
   }
-
-  const token = data.session.access_token;
-  const res = await fetch(path, {
-    ...init,
-    headers: { ...(init.headers || {}), ...(token ? { Authorization: `Bearer ${token}` } : {}) },
-  });
-  const body = await res.json().catch(() => ({}));
   return { res, body };
 }
 
@@ -72,19 +64,16 @@ export default function PricingPage() {
   }, []);
 
   useEffect(() => {
-    api("/api/pricing").then(({ res, body }) => {
-      if (res && res.ok) setPricing(body);
-    });
+    const { res, body } = await api("/api/pricing");
+    if (res && res.ok) setPricing(body);
   }, []);
 
   useEffect(() => {
     if (!user) { setWallet(null); setTxs([]); return; }
-    api("/api/wallet").then(({ res, body }) => {
-      if (res && res.ok) setWallet(body);
-    });
-    api("/api/transactions").then(({ res, body }) => {
-      if (res && res.ok) setTxs(Array.isArray(body.transactions) ? body.transactions : []);
-    });
+    const { res, body } = await api("/api/wallet");
+    if (res && res.ok) setWallet(body);
+    const { res: res2, body: body2 } = await api("/api/transactions");
+    if (res2 && res2.ok) setTxs(Array.isArray(body2.transactions) ? body2.transactions : []);
   }, [user]);
 
   const tiers = useMemo(() => pricing?.pay_as_you_go?.tiers ?? [], [pricing]);
@@ -105,12 +94,13 @@ export default function PricingPage() {
   async function startCredits() {
     if (!user) { window.location.href = "/login?next=/pricing"; return; }
     setBusy("credits"); setError("");
-    const { res, body } = await api("/api/checkout/credits", {
+    const { res, body, error } = await api("/api/checkout/credits", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ quantity: qty }),
     });
     setBusy("");
+    if (error) { setError(error); return; }
     if (!res || !res.ok) { setError(body.error || "Checkout is not available yet."); return; }
     if (body.url) { window.location.href = body.url; return; }
     setError(body.message || body.error || "Checkout is not configured yet.");
@@ -119,12 +109,13 @@ export default function PricingPage() {
   async function startPlan(plan: "research_pro" | "business") {
     if (!user) { window.location.href = "/login?next=/pricing"; return; }
     setBusy(plan); setError("");
-    const { res, body } = await api("/api/checkout/subscription", {
+    const { res, body, error } = await api("/api/checkout/subscription", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ plan, annual }),
     });
     setBusy("");
+    if (error) { setError(error); return; }
     if (!res || !res.ok) { setError(body.error || "Checkout is not available yet."); return; }
     if (body.url) { window.location.href = body.url; return; }
     setError(body.message || body.error || "Checkout is not configured yet.");

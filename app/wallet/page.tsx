@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/components/AuthProvider";
 import Logo from "@/components/Logo";
-import { getAccessToken } from "@/lib/supabase";
+import { authFetch } from "@/lib/auth-fetch";
 
 type ModeCosts = { light: number; medium: number; deep: number };
 type Summary = {
@@ -95,13 +95,10 @@ const TYPES = [
 const STATUSES = ["completed", "pending", "failed", "reversed"] as const;
 
 async function api(path: string, init: RequestInit = {}) {
-  const token = await getAccessToken();
-  const res = await fetch(path, {
-    ...init,
-    headers: { ...(init.headers || {}), ...(token ? { Authorization: `Bearer ${token}` } : {}) },
-  });
-  const body = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(body.error || "The request could not be completed.");
+  const { res, body, error } = await authFetch(path, init);
+  if (error) {
+    throw new Error(error || "API request failed");
+  }
   return body;
 }
 
@@ -162,13 +159,14 @@ export default function Wallet() {
     if (loading || !user) return;
     let alive = true;
     setError("");
-    Promise.all([api("/api/wallet"), api("/api/pricing")])
-      .then(([w, p]: [WalletData, Pricing]) => {
-        if (!alive) return;
-        setWallet(w);
-        setPricing(p);
-      })
-      .catch((err: Error) => alive && setError(err.message));
+    try {
+      const [wRes, pRes] = await Promise.all([api("/api/wallet"), api("/api/pricing")]);
+      if (!alive) return;
+      setWallet(wRes);
+      setPricing(pRes);
+    } catch (err: any) {
+      if (alive) setError(err.message);
+    }
     return () => {
       alive = false;
     };

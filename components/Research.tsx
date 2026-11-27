@@ -1,6 +1,6 @@
 "use client";
 import { useAuth } from "@/components/AuthProvider";
-import { useEffect, useRef, useState } from "react";
+import { authFetch } from "@/lib/auth-fetch";
 import Link from "next/link";
 import { getAccessToken } from "@/lib/supabase";
 import ReportView from "@/components/report/ReportView";
@@ -21,12 +21,10 @@ const MODES: { id: Mode; name: string; desc: string; time: string; queries: stri
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 async function api(path: string, init: RequestInit = {}) {
-  const token = await getAccessToken();
-  const res = await fetch(path, {
-    ...init,
-    headers: { ...(init.headers || {}), ...(token ? { Authorization: `Bearer ${token}` } : {}) },
-  });
-  const body = await res.json().catch(() => ({}));
+  const { res, body, error } = await authFetch(path, init);
+  if (error) {
+    throw new Error(error || "API request failed");
+  }
   return { res, body };
 }
 
@@ -78,9 +76,9 @@ export default function Research() {
       const pending = sessionStorage.getItem("verdict:pending-url");
       if (pending) { setUrl(pending); sessionStorage.removeItem("verdict:pending-url"); }
     } catch {}
-    api("/api/research/status").then(({ res, body }) => {
-      if (alive.current && res.ok) setStatus(body);
-    });
+    const { res, body } = await api("/api/research/status");
+    if (alive.current && res.ok) setStatus(body);
+    refreshWallet();
     refreshWallet();
     return () => { alive.current = false; };
   }, []);
@@ -97,7 +95,7 @@ export default function Research() {
     for (;;) {
       await sleep(1200);
       if (!alive.current) throw new Error("cancelled");
-      const { res, body } = await api(`/api/research/jobs/${id}?since=${seen}`).catch(() => ({ res: null, body: {} as any }));
+      const { res, body } = await api(`/api/research/jobs/${id}?since=${seen}`);
       if (!res) { if (++failures >= 5) throw new Error("Lost connection to the server."); continue; }
       if (res.status === 404) throw new Error("This job expired. Please run it again.");
       if (res.status === 401) throw new Error("Your session expired. Please log in again.");
