@@ -31,9 +31,9 @@ async function api(path: string, init: RequestInit = {}) {
     if (error === "session_expired") {
       window.location.href = "/login?next=/pricing";
     }
-    return { res: null, body: { error: error || "Session expired. Please log in again." } };
+    return { res: null, body: { error: error || "Session expired. Please log in again." }, error };
   }
-  return { res, body };
+  return { res, body, error: undefined };
 }
 
 const money = (n: number | null | undefined) => `$${(n ?? 0).toFixed(2)}`;
@@ -64,16 +64,20 @@ export default function PricingPage() {
   }, []);
 
   useEffect(() => {
-    const { res, body } = await api("/api/pricing");
-    if (res && res.ok) setPricing(body);
+    void (async () => {
+      const { res, body } = await api("/api/pricing");
+      if (res && res.ok) setPricing(body);
+    })();
   }, []);
 
   useEffect(() => {
     if (!user) { setWallet(null); setTxs([]); return; }
-    const { res, body } = await api("/api/wallet");
-    if (res && res.ok) setWallet(body);
-    const { res: res2, body: body2 } = await api("/api/transactions");
-    if (res2 && res2.ok) setTxs(Array.isArray(body2.transactions) ? body2.transactions : []);
+    void (async () => {
+      const { res, body } = await api("/api/wallet");
+      if (res && res.ok) setWallet(body);
+      const { res: res2, body: body2 } = await api("/api/transactions");
+      if (res2 && res2.ok) setTxs(Array.isArray(body2.transactions) ? body2.transactions : []);
+    })();
   }, [user]);
 
   const tiers = useMemo(() => pricing?.pay_as_you_go?.tiers ?? [], [pricing]);

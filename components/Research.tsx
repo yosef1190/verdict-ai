@@ -1,4 +1,5 @@
 "use client";
+import { useEffect, useRef, useState } from "react";
 import { useAuth } from "@/components/AuthProvider";
 import { authFetch } from "@/lib/auth-fetch";
 import Link from "next/link";
@@ -22,7 +23,7 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 async function api(path: string, init: RequestInit = {}) {
   const { res, body, error } = await authFetch(path, init);
-  if (error) {
+  if (error || !res) {
     throw new Error(error || "API request failed");
   }
   return { res, body };
@@ -76,10 +77,13 @@ export default function Research() {
       const pending = sessionStorage.getItem("verdict:pending-url");
       if (pending) { setUrl(pending); sessionStorage.removeItem("verdict:pending-url"); }
     } catch {}
-    const { res, body } = await api("/api/research/status");
-    if (alive.current && res.ok) setStatus(body);
-    refreshWallet();
-    refreshWallet();
+    void (async () => {
+      try {
+        const { res, body } = await api("/api/research/status");
+        if (alive.current && res.ok) setStatus(body);
+        await refreshWallet();
+      } catch {}
+    })();
     return () => { alive.current = false; };
   }, []);
 

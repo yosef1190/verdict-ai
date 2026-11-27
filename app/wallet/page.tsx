@@ -159,14 +159,16 @@ export default function Wallet() {
     if (loading || !user) return;
     let alive = true;
     setError("");
-    try {
-      const [wRes, pRes] = await Promise.all([api("/api/wallet"), api("/api/pricing")]);
-      if (!alive) return;
-      setWallet(wRes);
-      setPricing(pRes);
-    } catch (err: any) {
-      if (alive) setError(err.message);
-    }
+    void (async () => {
+      try {
+        const [wRes, pRes] = await Promise.all([api("/api/wallet"), api("/api/pricing")]);
+        if (!alive) return;
+        setWallet(wRes);
+        setPricing(pRes);
+      } catch (err: any) {
+        if (alive) setError(err.message);
+      }
+    })();
     return () => {
       alive = false;
     };

@@ -26,15 +26,13 @@ export async function authFetch(
   }
 
   const token = sessionData.session.access_token;
+  const headers = new Headers(init.headers);
+  if (token) headers.set("Authorization", `Bearer ${token}`);
 
   // Step 2: Make the request with the Bearer token
   const res = await fetch(path, {
     ...init,
-    headers: {
-      ...(init.headers || {}),
-      ...(init.headers?.Authorization ? { Authorization: init.headers.Authorization } : {}),
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
+    headers,
     // Include credentials if needed for cookie-based auth
     credentials: "include",
   });
@@ -49,13 +47,11 @@ export async function authFetch(
     if (!refreshError && refreshed?.session?.access_token) {
       // Refresh succeeded, retry the request with new token
       const newToken = refreshed.session.access_token;
+      const retryHeaders = new Headers(init.headers);
+      if (newToken) retryHeaders.set("Authorization", `Bearer ${newToken}`);
       const res2 = await fetch(path, {
         ...init,
-        headers: {
-          ...(init.headers || {}),
-          ...(init.headers?.Authorization ? { Authorization: init.headers.Authorization } : {}),
-          ...(newToken ? { Authorization: `Bearer ${newToken}` } : {}),
-        },
+        headers: retryHeaders,
         credentials: "include",
       });
       const body2 = await res2.json().catch(() => ({}));
