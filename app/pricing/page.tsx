@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAuth } from "@/components/AuthProvider";
 import { authFetch } from "@/lib/auth-fetch";
 import Logo from "@/components/Logo";
@@ -23,6 +23,30 @@ type Tx = {
   id: string; type: string; amount: number; mode?: string | null; status: string; created_at: string;
   balance_after?: number | null; payment_reference?: string | null;
 };
+type PendingCheckout =
+  | { kind: "credits"; quantity: number }
+  | { kind: "plan"; plan: "research_pro" | "business"; annual: boolean };
+
+const PENDING_CHECKOUT_KEY = "verdict:pending-checkout";
+
+function savePendingCheckout(action: PendingCheckout) {
+  try { sessionStorage.setItem(PENDING_CHECKOUT_KEY, JSON.stringify(action)); } catch {}
+}
+
+function readPendingCheckout(): PendingCheckout | null {
+  try {
+    const raw = sessionStorage.getItem(PENDING_CHECKOUT_KEY);
+    if (!raw) return null;
+    const action = JSON.parse(raw) as PendingCheckout;
+    if (action.kind === "credits" && Number.isFinite(action.quantity)) return action;
+    if (action.kind === "plan" && (action.plan === "research_pro" || action.plan === "business")) return action;
+  } catch {}
+  return null;
+}
+
+function clearPendingCheckout() {
+  try { sessionStorage.removeItem(PENDING_CHECKOUT_KEY); } catch {}
+}
 
 async function api(path: string, init: RequestInit = {}) {
   const { res, body, error } = await authFetch(path, init);
@@ -31,7 +55,7 @@ async function api(path: string, init: RequestInit = {}) {
     if (error === "session_expired") {
       window.location.href = "/login?next=/pricing";
     }
-    return { res: null, body: { error: error || "Session expired. Please log in again." }, error };
+    return { res: null, body: { error: "Please log in to continue." }, error };
   }
   return { res, body, error: undefined };
 }
@@ -39,7 +63,7 @@ async function api(path: string, init: RequestInit = {}) {
 const money = (n: number | null | undefined) => `$${(n ?? 0).toFixed(2)}`;
 
 export default function PricingPage() {
-  const { user } = useAuth();
+  const { user, loading } = useAuth();
   const [pricing, setPricing] = useState<Pricing | null>(null);
   const [wallet, setWallet] = useState<Wallet | null>(null);
   const [txs, setTxs] = useState<Tx[]>([]);
@@ -48,13 +72,14 @@ export default function PricingPage() {
   const [quote, setQuote] = useState<Tier | null>(null);
   const [busy, setBusy] = useState<string>("");
   const [error, setError] = useState("");
+  const resumed = useRef(false);
 
-  // Clear error when user becomes authenticated
+  // Clear stale auth errors as soon as the signed-in session is available
   useEffect(() => {
-    if (user) {
+    if (user && !loading) {
       setError("");
     }
-  }, [user]);
+  }, [user, loading]);
 
   // Clear error on mount if user is already available (avoid race condition)
   useEffect(() => {
@@ -80,6 +105,16 @@ export default function PricingPage() {
     })();
   }, [user]);
 
+  // A checkout started while logged out resumes after the user signs in
+  useEffect(() => {
+    if (loading || !user || resumed.current) return;
+    const pending = readPendingCheckout();
+    if (!pending) return;
+    resumed.current = true;
+    clearPendingCheckout();
+    void runCheckout(pending);
+  }, [loading, user]);
+
   const tiers = useMemo(() => pricing?.pay_as_you_go?.tiers ?? [], [pricing]);
 
   const quoteFor = useCallback(async (quantity: number) => {
@@ -95,35 +130,59 @@ export default function PricingPage() {
 
   const maxUnit = tiers.length ? Math.max(...tiers.map((t) => t.unit_price)) : 1;
 
-  async function startCredits() {
-    if (!user) { window.location.href = "/login?next=/pricing"; return; }
-    setBusy("credits"); setError("");
-    const { res, body, error } = await api("/api/checkout/credits", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ quantity: qty }),
-    });
-    setBusy("");
-    if (error) { setError(error); return; }
-    if (!res || !res.ok) { setError(body.error || "Checkout is not available yet."); return; }
-    if (body.url) { window.location.href = body.url; return; }
-    setError(body.message || body.error || "Checkout is not configured yet.");
+  function startCheckout(action: PendingCheckout) {
+    if (loading) return;
+    if (!user) {
+      savePendingCheckout(action);
+      window.location.href = "/login?next=/pricing";
+      return;
+    }
+    void runCheckout(action);
   }
 
-  async function startPlan(plan: "research_pro" | "business") {
-    if (!user) { window.location.href = "/login?next=/pricing"; return; }
-    setBusy(plan); setError("");
-    const { res, body, error } = await api("/api/checkout/subscription", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ plan, annual }),
-    });
-    setBusy("");
-    if (error) { setError(error); return; }
-    if (!res || !res.ok) { setError(body.error || "Checkout is not available yet."); return; }
-    if (body.url) { window.location.href = body.url; return; }
-    setError(body.message || body.error || "Checkout is not configured yet.");
+  async function runCheckout(action: PendingCheckout) {
+    setBusy(action.kind === "credits" ? "credits" : action.plan);
+    setError("");
+    savePendingCheckout(action);
+    try {
+      const { res, body, error } = action.kind === "credits"
+        ? await api("/api/checkout/credits", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ quantity: action.quantity }),
+          })
+        : await api("/api/checkout/subscription", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ plan: action.plan, annual: action.annual }),
+          });
+
+      if (error === "no_session" || error === "session_expired" || res?.status === 401) {
+        window.location.href = "/login?next=/pricing";
+        return;
+      }
+      setBusy("");
+      if (error || !res || !res.ok) {
+        clearPendingCheckout();
+        setError(body.error || error || "Checkout is not available yet.");
+        return;
+      }
+      if (body.url) {
+        clearPendingCheckout();
+        window.location.href = body.url;
+        return;
+      }
+      clearPendingCheckout();
+      setError(body.message || body.error || "Checkout is not configured yet.");
+    } catch (err: any) {
+      setBusy("");
+      clearPendingCheckout();
+      setError(err?.message || "Could not start checkout.");
+    }
   }
+
+  const startCredits = () => startCheckout({ kind: "credits", quantity: qty });
+  const startPlan = (plan: "research_pro" | "business") => startCheckout({ kind: "plan", plan, annual });
 
   const pro = pricing?.research_pro;
   const biz = pricing?.business;
@@ -209,7 +268,7 @@ export default function PricingPage() {
               <li>Priority processing</li>
               <li>Buy extra credits any time</li>
             </ul>
-            <button className="btn light" type="button" onClick={() => startPlan("research_pro")} disabled={busy === "research_pro"}>
+            <button className="btn light" type="button" onClick={() => startPlan("research_pro")} disabled={loading || busy === "research_pro"}>
               {busy === "research_pro" ? "Opening…" : "Choose Pro"}
             </button>
           </article>
@@ -226,7 +285,7 @@ export default function PricingPage() {
               <li>Exportable reports</li>
               <li>Highest priority processing</li>
             </ul>
-            <button className="btn ghost" type="button" onClick={() => startPlan("business")} disabled={busy === "business"}>
+            <button className="btn ghost" type="button" onClick={() => startPlan("business")} disabled={loading || busy === "business"}>
               {busy === "business" ? "Opening…" : "Choose Business"}
             </button>
           </article>
@@ -271,7 +330,7 @@ export default function PricingPage() {
               </div>
               <div><span>Expires</span><b>Never</b></div>
             </div>
-            <button className="btn light" type="button" onClick={startCredits} disabled={busy === "credits" || qty < 5}>
+            <button className="btn light" type="button" onClick={startCredits} disabled={loading || busy === "credits" || qty < 5}>
               {busy === "credits" ? "Opening…" : `Buy ${qty} credits`}
             </button>
           </div>

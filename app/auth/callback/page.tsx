@@ -9,7 +9,13 @@ export default function AuthCallback() {
   const router = useRouter();
   useEffect(() => {
     if (loading) return;
-    router.replace(user ? "/dashboard" : "/login");
+    let next = new URLSearchParams(window.location.search).get("next");
+    try {
+      next = next || sessionStorage.getItem("verdict:auth-next");
+      sessionStorage.removeItem("verdict:auth-next");
+    } catch {}
+    const target = next && next.startsWith("/") && !next.startsWith("//") ? next : "/dashboard";
+    router.replace(user ? target : `/login?next=${encodeURIComponent(target)}`);
   }, [user, loading, router]);
   return (
     <div className="auth-shell">

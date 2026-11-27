@@ -20,10 +20,18 @@ export default function AuthForm({ mode }: { mode: "signin" | "signup" }) {
   const { user, loading, signInWithGoogle } = useAuth();
   const router = useRouter();
   const isSignup = mode === "signup";
+  const [nextPath, setNextPath] = useState<string | null>(null);
+
+  useEffect(() => {
+    const next = new URLSearchParams(window.location.search).get("next");
+    const destination = next && next.startsWith("/") && !next.startsWith("//") ? next : "/dashboard";
+    setNextPath(destination);
+    try { sessionStorage.setItem("verdict:auth-next", destination); } catch {}
+  }, []);
 
   useEffect(() => { 
-    if (user && !loading) router.replace("/dashboard"); 
-  }, [user, loading, router]);
+    if (user && !loading && nextPath) router.replace(nextPath); 
+  }, [user, loading, nextPath, router]);
 
   if (user) return null;
 
@@ -39,7 +47,7 @@ export default function AuthForm({ mode }: { mode: "signin" | "signup" }) {
         <div className="auth-card">
           <h1 className="serif">{isSignup ? "Create your Verdict account" : "Log in to Verdict"}</h1>
           <p className="muted sub">{isSignup ? "Start with one free Light investigation." : "Welcome back."}</p>
-          <button type="button" className="btn light wide" onClick={signInWithGoogle} disabled={loading}><GoogleG /> {isSignup ? "Sign up with Google" : "Continue with Google"}</button>
+          <button type="button" className="btn light wide" onClick={signInWithGoogle} disabled={loading || !nextPath}><GoogleG /> {isSignup ? "Sign up with Google" : "Continue with Google"}</button>
         </div>
       </main>
     </div>
