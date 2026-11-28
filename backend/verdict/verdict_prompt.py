@@ -1,6 +1,6 @@
 """The Verdict product research and review report writer prompt."""
 
-from .scoring import interpretation_markdown
+from .scoring import interpretation_markdown, score_schema_markdown
 
 _RAW_PROMPT = """# VERDICT — PRODUCT RESEARCH & REVIEW REPORT WRITER
 
@@ -267,6 +267,16 @@ If important information is missing:
 A product can have high Credibility, moderate Evidence Strength, and lower
 Purchasing Confidence. Explain each score and the evidence behind it.
 
+## STRUCTURED SCORE OUTPUT
+
+At the very end of the report, after the Final Recommendation, output one fenced
+JSON block with an integer for every category. Replace each range string with a
+number from 0 up to that category's maximum. Do not add categories, omit
+categories, or write prose inside the block. The Verdict Score and the three
+component totals are calculated by the application from these integers.
+
+@@SCORE_SCHEMA@@
+
 ### SCORE INTERPRETATION
 
 Use exactly these bands. The label must match the score.
@@ -317,7 +327,7 @@ Do not repeat the same information across multiple sections.
 
 **Confidence: High / Medium / Low**
 
-Write a short 2–4 sentence summary explaining the most important reasons behind the scores. The Verdict Score must be consistent with the three component scores: a low Evidence Strength or Purchasing Confidence should pull the overall verdict down, and the recommendation label must match the Verdict Score band.
+Write a short 2–4 sentence summary explaining the most important reasons behind the scores. The application calculates the Verdict Score and the three component totals from the JSON block and replaces these XX placeholders, so the prose values are informational only. A low Evidence Strength or Purchasing Confidence should pull the overall verdict down, and the recommendation label must match the calculated Verdict Score band.
 
 ---
 
@@ -490,6 +500,12 @@ Example:
 
 **Verdict Score: 78/100**
 
+**Product Credibility: 82/100**
+
+**Evidence Strength: 74/100**
+
+**Purchasing Confidence: 78/100**
+
 **Recommendation: 🟢 Recommended**
 
 **Confidence: Medium**
@@ -610,6 +626,37 @@ The product offers strong features and generally positive performance for its pr
 
 The available evidence suggests this is a reasonable purchase for the right buyer, but it is not a clear best-in-class recommendation.
 
+```json
+{
+  "product_credibility": {
+    "product_legitimacy": 18,
+    "specification_consistency": 13,
+    "independent_performance_evidence": 17,
+    "customer_experiences": 13,
+    "reliability_and_durability": 8,
+    "safety": 4,
+    "brand_credibility": 7,
+    "seller_authenticity": 2
+  },
+  "evidence_strength": {
+    "source_reliability": 22,
+    "independent_source_coverage": 17,
+    "exact_product_matching": 12,
+    "claim_verification": 11,
+    "source_recency": 5,
+    "source_diversity": 5,
+    "evidence_consistency": 2
+  },
+  "purchasing_confidence": {
+    "available_evidence": 27,
+    "unresolved_risks": 20,
+    "source_contradictions": 11,
+    "missing_critical_information": 12,
+    "confidence_in_the_recommendation": 8
+  }
+}
+```
+
 ---
 
 # FINAL INSTRUCTION
@@ -625,4 +672,6 @@ The final Verdict must be balanced, transparent about uncertainty, and based on 
 **Accuracy and honesty are more important than sounding confident.**
 """
 
-VERDICT_SYSTEM_PROMPT = _RAW_PROMPT.replace("@@BANDS@@", interpretation_markdown())
+VERDICT_SYSTEM_PROMPT = _RAW_PROMPT.replace("@@BANDS@@", interpretation_markdown()).replace(
+    "@@SCORE_SCHEMA@@", score_schema_markdown()
+)

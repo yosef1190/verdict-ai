@@ -10,7 +10,7 @@ from .errors import LLMError, OpenRouterError
 from .extract import chunk_text, truncate
 from .models import ResearchPlan, Source, SourceSummary
 from .llm import LLMClient
-from .scoring import apply_score_bands
+from .scoring import apply_structured_scores, parse_score_json
 from .product import fallback_research_plan, same_page
 from .verdict_prompt import VERDICT_SYSTEM_PROMPT
 
@@ -709,7 +709,9 @@ class Summarizer:
             ):
                 body = retry.text
 
-        body = apply_score_bands(_normalize_verdict_heading(body))
+        body, _totals = apply_structured_scores(
+            _normalize_verdict_heading(body), parse_score_json(body)
+        )
         if not _verdict_complete(body):
             body += (
                 "\n\n> **Note:** The AI output ended before every required section "

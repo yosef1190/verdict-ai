@@ -45,6 +45,7 @@ from verdict.pipeline import RESEARCH_MODES, ResearchRequest, run_research
 _md = MarkdownIt("js-default", {"linkify": False})
 
 JOB_TTL_SECONDS = 60 * 60  # finished jobs are forgotten after an hour
+STALE_RESERVATION_SECONDS = 15 * 60  # held credits older than this are refunded
 MAX_STEPS = 200
 
 logger = logging.getLogger(__name__)
@@ -72,7 +73,8 @@ payment_service = PaymentService()
 
 
 RELAY_SECRET = os.getenv("VERDICT_RELAY_SECRET", "").strip()
-CRON_SECRET = os.getenv("VERDICT_CRON_SECRET", "").strip()
+DEV_AUTH = os.getenv("VERDICT_DEV", "").strip() == "1"
+_CRON_FALLBACK_WARNED = False
 
 PLAN_ALLOWANCE = {"research_pro": 50, "business": 150}
 PLAN_PRICES = {
@@ -106,6 +108,21 @@ def _days_left(value: str | None) -> int | None:
     return max(0, (end - datetime.now(timezone.utc)).days)
 
 
+def _cron_secret() -> str:
+    """Cron secret from Render's name, falling back to Vercel's name."""
+    global _CRON_FALLBACK_WARNED
+    verdict = os.getenv("VERDICT_CRON_SECRET", "").strip()
+    if verdict:
+        return verdict
+    vercel = os.getenv("CRON_SECRET", "").strip()
+    if vercel and not _CRON_FALLBACK_WARNED:
+        logger.warning(
+            "VERDICT_CRON_SECRET is not set; using CRON_SECRET from the Vercel cron configuration"
+        )
+        _CRON_FALLBACK_WARNED = True
+    return vercel
+
+
 def _user_from_request():
     """Return the authenticated user for the request, or None.
 
@@ -118,22 +135,33 @@ def _user_from_request():
     impersonating an account.
     """
     token = (request.headers.get("Authorization") or "").replace("Bearer ", "").strip()
-    if token and sb is not None:
-        try:
-            resp = sb.auth.get_user(token)
-            if resp and resp.user:
-                return resp.user
-        except Exception:  # noqa: BLE001 - fall through to the relay check
-            pass
+    if token:
+        auth_user = None
+        if sb is not None:
+            try:
+                resp = sb.auth.get_user(token)
+                auth_user = getattr(resp, "user", None)
+            except Exception:  # noqa: BLE001 - fall through to the relay check
+                auth_user = None
+        if auth_user is not None:
+            return {"id": auth_user.id, "email": getattr(auth_user, "email", None)}
+        logger.warning("Authentication failed: token rejected")
 
     forwarded = (request.headers.get("X-User-Id") or "").strip()
     relay_secret = (request.headers.get("X-Relay-Secret") or "").strip()
     secret_ok = bool(RELAY_SECRET) and secrets.compare_digest(relay_secret, RELAY_SECRET)
 
-    # Without a configured relay secret we only trust the header when Supabase
-    # is absent entirely (local development with no real data).
-    if forwarded and (secret_ok or (not RELAY_SECRET and sb is None)):
+    if forwarded and secret_ok:
         return {"id": forwarded}
+
+    if forwarded and not RELAY_SECRET and sb is None and DEV_AUTH:
+        return {"id": forwarded}
+
+    if forwarded:
+        if not RELAY_SECRET or not relay_secret:
+            logger.warning("Authentication failed: relay secret missing")
+        else:
+            logger.warning("Authentication failed: relay secret mismatch")
 
     return None
 
@@ -354,18 +382,23 @@ def _claim_webhook_event(event_id: str, event_type: str) -> bool:
         if isinstance(result, list):
             return bool(result[0]) if result else False
         return bool(result)
-    except Exception as exc:  # noqa: BLE001
-        message = str(exc).lower()
-        if "could not find the function" in message or "pgrst202" in message:
-            logger.warning("Webhook dedupe function missing; using local marker")
-            with _webhook_lock:
-                key = f"{event_type}:{event_id}"
-                if key in _webhook_events:
-                    return False
-                _webhook_events.add(key)
-                return True
+    except Exception:  # noqa: BLE001
         logger.exception("Could not claim webhook event %s", event_id)
         raise
+
+
+def _release_webhook_event(event_id: str, event_type: str) -> None:
+    if not event_id:
+        return
+    with _webhook_lock:
+        _webhook_events.discard(event_id)
+        _webhook_events.discard(f"{event_type}:{event_id}")
+    if sb is None:
+        return
+    try:
+        sb.table("stripe_webhook_events").delete().eq("id", event_id).execute()
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Could not release webhook claim %s: %s", event_id, exc)
 
 
 def _plan_from_price(price_id: str) -> tuple[str | None, str | None]:
@@ -783,7 +816,7 @@ def create_app(settings: Settings | None = None) -> Flask:
             keywords=str(payload.get("keywords") or ""),
             focus=str(payload.get("focus") or ""),
             engine=str(payload.get("engine") or "yahoo"),
-            render=bool(payload.get("render", False)),
+            render=RESEARCH_MODES[mode]["run_js"],
             no_ai=bool(payload.get("no_ai", False)),
             mode=mode,
         )
@@ -823,9 +856,24 @@ def create_app(settings: Settings | None = None) -> Flask:
 
         with jobs_lock:
             jobs[job_id] = job
-        _supabase_create_job(job_id, user_id, "queued", [], mode=mode, cost=cost)
+        try:
+            _supabase_create_job(job_id, user_id, "queued", [], mode=mode, cost=cost)
+            pool.submit(work, job)
+        except Exception as exc:  # noqa: BLE001
+            with jobs_lock:
+                jobs.pop(job_id, None)
+            if job.reserved and job.user_id:
+                credit_service.release_and_refund(
+                    job.user_id, job.id, reason="investigation could not start"
+                )
+            elif job.free_grant and job.user_id:
+                credit_service.release_free_light(job.user_id)
+            _supabase_update_job(
+                job_id, {"status": "error", "error": "Investigation could not start."}
+            )
+            logger.exception("Could not queue investigation %s", job_id)
+            return jsonify(error="Could not start investigation. Please try again."), 500
 
-        pool.submit(work, job)
         return (
             jsonify(
                 id=job_id,
@@ -1051,12 +1099,13 @@ def create_app(settings: Settings | None = None) -> Flask:
     def allocate_credits():
         """Monthly allocation job for annual plans (and missed monthly invoices).
 
-        Protected by VERDICT_CRON_SECRET. Credits are granted once per
+        Protected by VERDICT_CRON_SECRET (or Vercel's CRON_SECRET). Credits are granted once per
         subscription and calendar month; the ledger reference is the idempotency
         key, so duplicate runs never allocate twice.
         """
         supplied = request.headers.get("X-Cron-Secret", "").strip()
-        if not CRON_SECRET or not secrets.compare_digest(supplied, CRON_SECRET):
+        secret = _cron_secret()
+        if not secret or not secrets.compare_digest(supplied, secret):
             return jsonify(error="Unauthorized"), 401
         if sb is None:
             return jsonify(allocated=0, skipped=0)
@@ -1100,6 +1149,89 @@ def create_app(settings: Settings | None = None) -> Flask:
             else:
                 skipped += 1
         return jsonify(allocated=allocated, skipped=skipped, month=month)
+
+    @app.post("/api/admin/reconcile-payments")
+    def reconcile_payments():
+        supplied = request.headers.get("X-Cron-Secret", "").strip()
+        secret = _cron_secret()
+        if not secret or not secrets.compare_digest(supplied, secret):
+            return jsonify(error="Unauthorized"), 401
+        if sb is None:
+            return jsonify(checked=0, granted=0)
+
+        try:
+            rows = (
+                sb.table("payments")
+                .select("*")
+                .eq("status", "pending")
+                .execute()
+                .data
+                or []
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Reconcile could not list payments: %s", exc)
+            return jsonify(error="Could not read payments"), 502
+
+        checked = granted = 0
+        for row in rows:
+            session_id = row.get("provider_session_id")
+            if not session_id:
+                continue
+            checked += 1
+            session = payment_service.retrieve_checkout_session(session_id)
+            if not session or session.get("payment_status") != "paid":
+                continue
+            metadata = session.get("metadata") or {}
+            user_id = row.get("user_id") or session.get("client_reference_id") or metadata.get("user_id")
+            if not user_id or row.get("kind") != "credits":
+                continue
+            quantity = int(row.get("credit_amount") or metadata.get("quantity") or 0)
+            if credit_service.grant_credits(
+                user_id,
+                quantity,
+                kind="purchased",
+                type="purchase",
+                reference=session_id,
+                amount_cents=row.get("amount_cents"),
+                description=f"{quantity} research credits purchased",
+            ):
+                granted += 1
+            try:
+                sb.table("payments").update({"status": "succeeded"}).eq("id", row["id"]).execute()
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("Reconcile could not update payment %s: %s", row.get("id"), exc)
+
+        return jsonify(checked=checked, granted=granted)
+
+    @app.post("/api/admin/sweep-reservations")
+    def sweep_reservations():
+        """Refund held reservations whose worker never reported back.
+
+        Protected by VERDICT_CRON_SECRET (or Vercel's CRON_SECRET). A deploy or crash can kill a running
+        job before it refunds its own reservation; this sweep catches those
+        orphans after the maximum research time has elapsed.
+        """
+        supplied = request.headers.get("X-Cron-Secret", "").strip()
+        secret = _cron_secret()
+        if not secret or not secrets.compare_digest(supplied, secret):
+            return jsonify(error="Unauthorized"), 401
+
+        stale = credit_service.stale_reservations(STALE_RESERVATION_SECONDS)
+        released = 0
+        for row in stale:
+            investigation_id = row.get("investigation_id")
+            user_id = row.get("user_id")
+            if not investigation_id or not user_id:
+                continue
+            if credit_service.release_and_refund(
+                user_id, investigation_id, reason="stale reservation"
+            ):
+                released += 1
+        return jsonify(
+            checked=len(stale),
+            released=released,
+            older_than_seconds=STALE_RESERVATION_SECONDS,
+        )
 
     # --------------------------------------------------------------- webhooks
 
@@ -1306,8 +1438,8 @@ def create_app(settings: Settings | None = None) -> Flask:
 
         except Exception:  # noqa: BLE001
             logger.exception("Webhook handling failed for %s", event_type)
-            # Return 200 so Stripe does not retry a handler bug forever; the
-            # payment row remains pending and can be reconciled.
+            _release_webhook_event(event_id, event_type)
+            return jsonify(error="Could not process webhook"), 500
 
         return jsonify(ok=True)
 

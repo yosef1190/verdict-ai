@@ -16,15 +16,11 @@ const problems = [
   ["Buried negative experiences", "The complaints that matter sit on page twelve—or on a forum."],
 ];
 const signals = [
-  ["Product Quality", "Build, materials and performance as reported by owners.", "M12 3l2.4 1.6 2.9-.2 1.2 2.7 2.5 1.5-.7 2.8 1.1 2.6-2 2.1-.2 2.9-2.8.9L12 21l-2.4-1.6-2.9.2-1.2-2.7-2.5-1.5.7-2.8L2.6 10l2-2.1.2.2-2.9 2.8-.9zM8.5 12.2l2.5 2.5 4.5-5"],
-  ["Review Credibility", "Patterns that suggest paid, generic or duplicated reviews.", "M12 3l8 3v6c0 4.5-3.2 8-8 9-4.8-1-8-4.5-8-9V6zM8.5 12l2.5 2.5 4.5-5"],
-  ["Real Customer Experiences", "Specific, long-term accounts from people who bought it.", "M9 11a3 3 0 100-6 3 3 0 000 6zM3 20c0-3.3 2.7-6 6-6s6 2.7 6 6M16 5.5a3 3 0 010 5.5M18 14.5c2 .6 3 2.7 3 5.5"],
-  ["Red Flags", "Safety issues, recalls, misleading claims and seller risk.", "M12 21a9 9 0 100-18 9 9 0 000 18zM12 8v5M12 16v.01"],
-  ["Value for Money", "What you get for the price compared with alternatives.", "M12 4v16M5 20h14M5 8h14M5 8l-2.5 6a3 3 0 005 0zM19 8l-2.5 6a3 3 0 005 0z"],
-  ["Brand Reputation", "Track record, warranty handling and support history.", "M5 21V4h9v17M14 9h5v12M3 21h18M8 8h2M8 12h2M8 16h2"],
-  ["Common Complaints", "The issues that come up again and again—ranked.", "M4 5h16v11H9l-5 4zM12 8.5v3M12 13.5v.01"],
+  ["Product Credibility", "Legitimacy 20, specification consistency 15, independent performance 20, customer experience 15, reliability 10, safety 5, brand 10, seller 5.", "M12 3l2.4 1.6 2.9-.2 1.2 2.7 2.5 1.5-.7 2.8 1.1 2.6-2 2.1-.2 2.9-2.8.9L12 21l-2.4-1.6-2.9.2-1.2-2.7-2.5-1.5.7-2.8L2.6 10l2-2.1.2.2-2.9 2.8-.9zM8.5 12.2l2.5 2.5 4.5-5"],
+  ["Evidence Strength", "Source reliability 25, independent coverage 20, exact matching 15, claim verification 15, recency 10, diversity 10, consistency 5.", "M12 3l8 3v6c0 4.5-3.2 8-8 9-4.8-1-8-4.5-8-9V6zM8.5 12l2.5 2.5 4.5-5"],
+  ["Purchasing Confidence", "Available evidence 35, unresolved risks 25, contradictions 15, missing information 15, recommendation confidence 10.", "M9 11a3 3 0 100-6 3 3 0 000 6zM3 20c0-3.3 2.7-6 6-6s6 2.7 6 6M16 5.5a3 3 0 010 5.5M18 14.5c2 .6 3 2.7 3 5.5"],
 ];
-const bars = [["Product quality", 86], ["Review credibility", 78], ["Value for money", 84], ["Brand reputation", 80]] as const;
+const bars = [["Product credibility", 82], ["Evidence strength", 74], ["Purchasing confidence", 78]] as const;
 const pros = ["Strong customer satisfaction", "Positive performance feedback", "Good value for money", "Multiple positive customer experiences"];
 const cons = ["Some durability complaints", "Inconsistent customer support experiences"];
 const old = ["Search dozens of websites", "Read hundreds of reviews", "Miss important negative feedback", "Struggle to identify suspicious reviews", "Spend hours researching"];
@@ -100,12 +96,12 @@ export default function Home() {
           <div className="steps">
             <article><p className="mono step">Step 01</p><h3 className="serif">Paste a Product Link</h3><p>Enter the URL of any product you are considering buying.</p><div className="chip url mono">shop.example.com/products/…</div></article>
             <article><p className="mono step">Step 02</p><h3 className="serif">Verdict Researches It</h3><p>Verdict analyzes available product information, reviews, discussions, customer experiences, and relevant trust signals.</p><div className="chips">{["Product page", "Retailer reviews", "Forums", "Q&A threads", "Return notes"].map((c) => <span key={c} className="chip mono">{c}</span>)}</div></article>
-            <article><p className="mono step">Step 03</p><h3 className="serif">Get Your Verdict</h3><p>Receive a detailed report with a Verdict Score, strengths, concerns, potential red flags, and a clear final recommendation.</p><div className="mini"><Dial size={84} label /><div><b className="green">Recommended</b><span>4 strengths · 2 concerns</span></div></div></article>
+            <article><p className="mono step">Step 03</p><h3 className="serif">Get Your Verdict</h3><p>Receive a detailed report with a Verdict Score, three component scores, strengths, concerns, potential red flags, and a clear final recommendation.</p><div className="mini"><Dial size={84} label /><div><b className="green">Recommended</b><span>4 strengths · 2 concerns</span></div></div></article>
           </div>
         </section>
 
         <section className="sec wrap" id="analyze">
-          <div className="head2"><div><Label n="03">What Verdict analyzes</Label><h2 className="serif big">Every signal that matters, weighed.</h2></div><p className="lede left">Seven dimensions of evidence, each scored independently and rolled into one number you can trust.</p></div>
+          <div className="head2"><div><Label n="03">What Verdict analyzes</Label><h2 className="serif big">Every signal that matters, weighed.</h2></div><p className="lede left">Three independent scores, calculated from category-level evidence, combine into one Verdict Score you can trust.</p></div>
           <div className="grid">
             {signals.map(([t, d, p], i) => (
               <div className="cell" key={t}><div className="cell-top"><Icon d={p} /><span className="mono n">{String(i + 1).padStart(2, "00")}</span></div><h3>{t}</h3><p>{d}</p></div>

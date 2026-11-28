@@ -51,7 +51,7 @@ function clearPendingCheckout() {
 async function api(path: string, init: RequestInit = {}) {
   const { res, body, error } = await authFetch(path, init);
   if (error) {
-    return { res: null, body: { error: "Please log in to continue." }, error };
+    return { res: null, body: { error: body?.error || "Please log in to continue." }, error };
   }
   return { res, body, error: undefined };
 }
@@ -167,7 +167,7 @@ export default function PricingPage() {
       setBusy("");
       if (error || !res || !res.ok) {
         clearPendingCheckout();
-        setError(body.error || error || "Checkout is not available yet.");
+        setError(body.error || "Checkout is not available yet.");
         return;
       }
       if (body.url) {

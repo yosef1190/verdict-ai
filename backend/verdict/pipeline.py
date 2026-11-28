@@ -56,6 +56,7 @@ RESEARCH_MODES: dict[str, dict] = {
         "queries": 3,
         "results_per_query": 6,
         "scrape_count": 4,
+        "run_js": False,
         "label": "Light",
     },
     "medium": {
@@ -64,6 +65,7 @@ RESEARCH_MODES: dict[str, dict] = {
         "queries": 4,
         "results_per_query": 8,
         "scrape_count": 6,
+        "run_js": False,
         "label": "Medium",
     },
     "deep": {
@@ -72,6 +74,7 @@ RESEARCH_MODES: dict[str, dict] = {
         "queries": 5,
         "results_per_query": 10,
         "scrape_count": 8,
+        "run_js": False,
         "label": "Deep",
     },
 }

@@ -97,7 +97,7 @@ const STATUSES = ["completed", "pending", "failed", "reversed"] as const;
 async function api(path: string, init: RequestInit = {}) {
   const { res, body, error } = await authFetch(path, init);
   if (error) {
-    throw new Error(error || "API request failed");
+    throw new Error(body?.error || "Please log in to continue.");
   }
   return body;
 }

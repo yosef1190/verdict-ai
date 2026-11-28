@@ -22,6 +22,14 @@ def test_validate_clamps_numbers():
     assert req.limit == 50 and req.scrape_count == 1
 
 
+def test_validate_caps_client_text_fields():
+    req = validate_request(
+        ResearchRequest(text="a", keywords="x" * 1000, focus="y" * 1000)
+    )
+    assert len(req.keywords) <= 300
+    assert len(req.focus) <= 300
+
+
 def test_parallel_searches_run_concurrently():
     """Five 0.2s queries should finish in roughly 0.2s, not 1.0s.
 

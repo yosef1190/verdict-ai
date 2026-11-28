@@ -1,6 +1,15 @@
 import pytest
 
-from verdict.scoring import BANDS, apply_score_bands, band_for, find_score
+from verdict.scoring import (
+    BANDS,
+    SCORE_WEIGHTS,
+    apply_score_bands,
+    apply_structured_scores,
+    band_for,
+    compute_score_totals,
+    find_score,
+    parse_score_json,
+)
 from verdict.verdict_prompt import VERDICT_SYSTEM_PROMPT
 
 
@@ -37,6 +46,61 @@ def test_prompt_contains_every_band():
     for band in BANDS:
         assert band.title in VERDICT_SYSTEM_PROMPT
     assert "@@BANDS@@" not in VERDICT_SYSTEM_PROMPT
+
+
+def test_rubric_weights_sum_to_100():
+    assert {name: sum(weights.values()) for name, weights in SCORE_WEIGHTS.items()} == {
+        "product_credibility": 100,
+        "evidence_strength": 100,
+        "purchasing_confidence": 100,
+    }
+
+
+def test_prompt_contains_structured_schema():
+    for name, categories in SCORE_WEIGHTS.items():
+        assert f'"{name}"' in VERDICT_SYSTEM_PROMPT
+        for category, maximum in categories.items():
+            assert f'"{category}": "0-{maximum}"' in VERDICT_SYSTEM_PROMPT
+    assert "STRUCTURED SCORE OUTPUT" in VERDICT_SYSTEM_PROMPT
+
+
+def test_missing_category_scores_are_zero_instead_of_crashing():
+    totals = compute_score_totals({"product_credibility": {"product_legitimacy": 999}})
+    assert totals["product_credibility"] == 20
+    assert totals["evidence_strength"] == 0
+    assert totals["purchasing_confidence"] == 0
+    assert totals["verdict"] == 7
+
+
+def test_identical_inputs_give_identical_total():
+    payload = {
+        "product_credibility": {"product_legitimacy": 18, "safety": 4},
+        "evidence_strength": {"source_reliability": 22},
+        "purchasing_confidence": {"available_evidence": 27},
+    }
+    first = compute_score_totals(payload)
+    assert first == compute_score_totals(payload)
+    assert first == {
+        "product_credibility": 22,
+        "evidence_strength": 22,
+        "purchasing_confidence": 27,
+        "verdict": 24,
+    }
+
+
+def test_structured_scores_override_prose_and_strip_json():
+    md = (
+        "# 🏆 Overall Verdict\n\n**Verdict Score: 99/100**\n\n"
+        "**Product Credibility: 99/100**\n\n"
+        "**Evidence Strength: 99/100**\n\n"
+        "**Purchasing Confidence: 99/100**\n\n"
+        "```json\n{\"product_credibility\":{\"product_legitimacy\":20}}\n```\n"
+    )
+    out, totals = apply_structured_scores(md, parse_score_json(md))
+    assert totals["product_credibility"] == 20
+    assert "Verdict Score: 7/100" in out
+    assert "Product Credibility: 20/100" in out
+    assert "```json" not in out
 
 
 def test_find_score_variants():
@@ -86,6 +150,10 @@ def test_build_product_report_enforces_band(monkeypatch):
         "**Recommendation: Worth Considering**\n\n"
         + "\n\n".join(f"## {name}\n\ntext" for name in sections[1:])
         + "\n\nAvoid this product because the evidence of serious problems is strong and consistent."
+        + "\n\n```json\n"
+        + '{"product_credibility":{"product_legitimacy":12},'
+        + '"evidence_strength":{"source_reliability":12},'
+        + '"purchasing_confidence":{"available_evidence":12}}\n```'
     )
 
     class FakeClient:

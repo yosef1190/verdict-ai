@@ -1,4 +1,6 @@
+import logging
 import time
+from types import SimpleNamespace
 
 import pytest
 
@@ -9,7 +11,8 @@ from verdict.pipeline import ResearchResult
 
 
 @pytest.fixture()
-def client():
+def client(monkeypatch):
+    monkeypatch.setattr(web_module, "DEV_AUTH", True)
     # The credit service is module-level; clear its in-memory state so each test
     # starts with an unused free Light grant and an empty wallet.
     svc = web_module.credit_service
@@ -51,6 +54,7 @@ def test_index_renders(client):
 def test_research_requires_login(client):
     res = client.post("/api/research", json={"text": "https://a.com"})
     assert res.status_code == 401
+    assert res.get_json()["error"] == "Please log in to run research."
 
 
 def test_rejects_empty_input(client):
@@ -81,6 +85,69 @@ def test_job_success_reports_progress_and_sanitizes_html(client, monkeypatch):
     assert "<script>" not in data["html"]
     assert "href=\"javascript" not in data["html"]
     assert 'href="https://example.com"' in data["html"]
+
+
+def test_client_cannot_force_js_rendering(client, monkeypatch):
+    captured = {}
+
+    def fake(req, settings, progress):
+        captured["render"] = req.render
+        return ResearchResult("Widget review", "# Widget")
+
+    monkeypatch.setattr(web_module, "run_research", fake)
+    res = client.post(
+        "/api/research",
+        json={"text": "https://shop.example/p", "render": True},
+        headers=AUTH,
+    )
+    assert res.status_code == 202
+    wait_for(client, res.get_json()["id"])
+    assert captured["render"] is False
+
+
+def test_queue_failure_refunds_reservation(client, monkeypatch):
+    svc = web_module.credit_service
+    svc.grant_credits("test-user", 5, type="purchase")
+
+    def boom(*args, **kwargs):
+        raise RuntimeError("queue down")
+
+    monkeypatch.setattr(client.application.config["POOL"], "submit", boom)
+    res = client.post(
+        "/api/research",
+        json={"text": "https://shop.example/p", "mode": "medium"},
+        headers=AUTH,
+    )
+    assert res.status_code == 500
+    assert svc.get_wallet("test-user").total == 5
+    assert not any(r.get("status") == "held" for r in svc._reservations.values())
+
+
+def test_stale_reservation_sweep_refunds_after_timeout(client, monkeypatch):
+    svc = web_module.credit_service
+    svc.grant_credits("test-user", 5, type="purchase")
+    monkeypatch.setattr(
+        client.application.config["POOL"], "submit", lambda *args, **kwargs: None
+    )
+
+    res = client.post(
+        "/api/research",
+        json={"text": "https://shop.example/p", "mode": "medium"},
+        headers=AUTH,
+    )
+    assert res.status_code == 202
+    job_id = res.get_json()["id"]
+    assert svc.get_wallet("test-user").total == 3
+
+    svc._reservations[job_id]["created_at"] = time.time() - 1000
+    monkeypatch.delenv("VERDICT_CRON_SECRET", raising=False)
+    monkeypatch.setenv("CRON_SECRET", "cron-secret")
+    assert client.post("/api/admin/sweep-reservations").status_code == 401
+    res = client.post(
+        "/api/admin/sweep-reservations", headers={"X-Cron-Secret": "cron-secret"}
+    )
+    assert res.get_json()["released"] == 1
+    assert svc.get_wallet("test-user").total == 5
 
 
 def test_poll_since_returns_only_new_steps(client, monkeypatch):
@@ -136,6 +203,57 @@ def test_forwarded_user_requires_relay_secret(client, monkeypatch):
         "/api/wallet", headers={"X-User-Id": "victim", "X-Relay-Secret": "s3cret"}
     )
     assert res.status_code == 200
+
+
+def test_supabase_user_is_converted_to_dict(client, monkeypatch):
+    class FakeAuth:
+        def get_user(self, token):
+            return SimpleNamespace(user=SimpleNamespace(id="sb-user", email="user@example.com"))
+
+    monkeypatch.setattr(web_module, "sb", SimpleNamespace(auth=FakeAuth()))
+    with client.application.test_request_context(headers={"Authorization": "Bearer any-token"}):
+        assert web_module._user_from_request() == {"id": "sb-user", "email": "user@example.com"}
+
+
+def test_auth_failures_log_reason_without_token(client, monkeypatch, caplog):
+    monkeypatch.setattr(web_module, "sb", SimpleNamespace(auth=SimpleNamespace(get_user=lambda token: None)))
+    monkeypatch.setattr(web_module, "RELAY_SECRET", "expected")
+
+    with caplog.at_level(logging.WARNING):
+        with client.application.test_request_context(headers={"Authorization": "Bearer secret-token"}):
+            assert web_module._user_from_request() is None
+    assert "token rejected" in caplog.text.lower()
+    assert "secret-token" not in caplog.text
+
+    caplog.clear()
+    with caplog.at_level(logging.WARNING):
+        with client.application.test_request_context(headers={"X-User-Id": "someone", "X-Relay-Secret": "wrong"}):
+            assert web_module._user_from_request() is None
+    assert "relay secret mismatch" in caplog.text.lower()
+    assert "wrong" not in caplog.text
+
+    monkeypatch.setattr(web_module, "RELAY_SECRET", "")
+    caplog.clear()
+    with caplog.at_level(logging.WARNING):
+        with client.application.test_request_context(headers={"X-User-Id": "someone"}):
+            assert web_module._user_from_request() is None
+    assert "relay secret missing" in caplog.text.lower()
+
+
+def test_header_auth_fails_closed_without_dev_flag(client, monkeypatch):
+    monkeypatch.setattr(web_module, "sb", None)
+    monkeypatch.setattr(web_module, "RELAY_SECRET", "")
+    monkeypatch.setattr(web_module, "DEV_AUTH", False)
+    with client.application.test_request_context(headers={"X-User-Id": "someone"}):
+        assert web_module._user_from_request() is None
+
+
+def test_header_auth_allowed_with_dev_flag(client, monkeypatch):
+    monkeypatch.setattr(web_module, "sb", None)
+    monkeypatch.setattr(web_module, "RELAY_SECRET", "")
+    monkeypatch.setattr(web_module, "DEV_AUTH", True)
+    with client.application.test_request_context(headers={"X-User-Id": "dev-user"}):
+        assert web_module._user_from_request() == {"id": "dev-user"}
 
 
 def test_job_is_private_to_its_owner(client, monkeypatch):
@@ -204,6 +322,22 @@ def _credit_purchase_event(session_id="cs_test_1", quantity=25, user="wh-user", 
     }
 
 
+def test_webhook_claim_missing_rpc_fails_closed(monkeypatch):
+    class MissingRPC:
+        def __call__(self, name, params):
+            class Call:
+                def execute(self):
+                    raise RuntimeError(
+                        "Could not find the function public.verdict_claim_webhook_event"
+                    )
+
+            return Call()
+
+    monkeypatch.setattr(web_module, "sb", SimpleNamespace(rpc=MissingRPC()))
+    with pytest.raises(RuntimeError, match="Could not find the function"):
+        web_module._claim_webhook_event("evt-missing-rpc", "checkout.session.completed")
+
+
 def test_webhook_grants_credits_once_and_ignores_replays(client, monkeypatch):
     event = _credit_purchase_event()
     headers = {"X-User-Id": "wh-user"}
@@ -216,6 +350,74 @@ def test_webhook_grants_credits_once_and_ignores_replays(client, monkeypatch):
     assert _post_event(client, monkeypatch, event).status_code == 200
     wallet = client.get("/api/wallet", headers=headers).get_json()
     assert wallet["purchased_credits"] == 25
+
+
+def test_webhook_failure_releases_claim_and_asks_stripe_to_retry(client, monkeypatch):
+    event = _credit_purchase_event()
+    event["id"] = "evt_fail_1"
+    original_grant = web_module.credit_service.grant_credits
+
+    def boom(*args, **kwargs):
+        raise RuntimeError("database unavailable")
+
+    monkeypatch.setattr(web_module.credit_service, "grant_credits", boom)
+    assert _post_event(client, monkeypatch, event).status_code == 500
+
+    monkeypatch.setattr(web_module.credit_service, "grant_credits", original_grant)
+    assert _post_event(client, monkeypatch, event).status_code == 200
+    wallet = client.get("/api/wallet", headers={"X-User-Id": "wh-user"}).get_json()
+    assert wallet["purchased_credits"] == 25
+
+
+def test_reconcile_grants_paid_pending_payment(client, monkeypatch):
+    rows = [{
+        "id": "pay-1",
+        "user_id": "recon-user",
+        "kind": "credits",
+        "credit_amount": 10,
+        "amount_cents": 900,
+        "provider_session_id": "cs_recon_1",
+        "status": "pending",
+    }]
+
+    class FakePayments:
+        def __init__(self):
+            self._updating = False
+
+        def select(self, *args):
+            self._updating = False
+            return self
+
+        def update(self, payload):
+            self._updating = True
+            return self
+
+        def eq(self, *args):
+            return self
+
+        def execute(self):
+            return SimpleNamespace(data=[] if self._updating else rows)
+
+    monkeypatch.setattr(web_module, "sb", SimpleNamespace(table=lambda name: FakePayments()))
+    monkeypatch.delenv("VERDICT_CRON_SECRET", raising=False)
+    monkeypatch.setenv("CRON_SECRET", "cron-secret")
+    monkeypatch.setattr(
+        web_module.payment_service,
+        "retrieve_checkout_session",
+        lambda session_id: {
+            "id": session_id,
+            "payment_status": "paid",
+            "client_reference_id": "recon-user",
+            "metadata": {"kind": "credits", "user_id": "recon-user", "quantity": "10"},
+        },
+    )
+
+    assert client.post("/api/admin/reconcile-payments").status_code == 401
+    res = client.post("/api/admin/reconcile-payments", headers={"X-Cron-Secret": "cron-secret"})
+    assert res.status_code == 200
+    assert res.get_json() == {"checked": 1, "granted": 1}
+    wallet = web_module.credit_service.get_wallet("recon-user")
+    assert wallet.purchased_credits == 10
 
 
 def test_webhook_subscription_grants_monthly_allowance(client, monkeypatch):
@@ -357,11 +559,24 @@ def test_subscription_management_requires_a_linked_subscription(client):
 
 
 def test_credit_allocation_cron_requires_secret(client, monkeypatch):
-    monkeypatch.setattr(web_module, "CRON_SECRET", "cron-secret")
+    monkeypatch.delenv("VERDICT_CRON_SECRET", raising=False)
+    monkeypatch.setenv("CRON_SECRET", "cron-secret")
     assert client.post("/api/subscriptions/allocate").status_code == 401
     assert client.post(
         "/api/subscriptions/allocate", headers={"X-Cron-Secret": "cron-secret"}
     ).status_code == 200
+
+
+def test_cron_secret_accepts_vercel_name_and_prefers_render_name(monkeypatch, caplog):
+    monkeypatch.delenv("VERDICT_CRON_SECRET", raising=False)
+    monkeypatch.setenv("CRON_SECRET", "vercel-secret")
+    monkeypatch.setattr(web_module, "_CRON_FALLBACK_WARNED", False)
+    with caplog.at_level(logging.WARNING):
+        assert web_module._cron_secret() == "vercel-secret"
+    assert "VERDICT_CRON_SECRET is not set" in caplog.text
+
+    monkeypatch.setenv("VERDICT_CRON_SECRET", "render-secret")
+    assert web_module._cron_secret() == "render-secret"
 
 
 def test_subscription_checkout_accepts_annual_boolean(client):

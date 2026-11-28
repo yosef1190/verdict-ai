@@ -284,8 +284,8 @@ def validate_report(
     """Run the automated pre-delivery checks from the spec.
 
     Checks that every citation points at a real collected source, that the
-    three scores are present and internally consistent, and that limitations
-    are disclosed when evidence is thin.
+    overall score and three component scores are present and internally
+    consistent, and that limitations are disclosed when evidence is thin.
     """
     problems: list[str] = []
     scores = extract_scores(markdown)
@@ -300,7 +300,7 @@ def validate_report(
     if bad:
         problems.append(f"Citations out of range: {sorted(bad)} (only {source_count} sources)")
 
-    # 2. The three component scores should be present.
+    # 2. The three component scores and the overall score should be present.
     if require_scores:
         missing = [
             label

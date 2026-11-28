@@ -212,6 +212,21 @@ class PaymentService:
             raise PaymentNotConfigured("Payments are not configured yet.")
         return self.subscription_state(_stripe.Subscription.retrieve(subscription_id))
 
+    def retrieve_checkout_session(self, session_id: str) -> dict[str, Any] | None:
+        if not self._configured or not session_id:
+            return None
+        try:
+            session = _stripe.checkout.Session.retrieve(session_id)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Could not retrieve Stripe session %s: %s", session_id, exc)
+            return None
+        return {
+            "id": _field(session, "id", ""),
+            "payment_status": _field(session, "payment_status", ""),
+            "client_reference_id": _field(session, "client_reference_id"),
+            "metadata": _field(session, "metadata", {}) or {},
+        }
+
     def create_billing_portal(self, customer_id: str, return_url: str) -> CheckoutResult:
         """Stripe-hosted portal for changing card, plan and billing details."""
         if not self._configured or not customer_id:

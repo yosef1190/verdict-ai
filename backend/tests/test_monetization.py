@@ -186,9 +186,11 @@ def test_concurrent_requests_cannot_double_spend():
 
 
 @pytest.fixture()
-def client():
+def client(monkeypatch):
+    import web as web_module
     from web import create_app
 
+    monkeypatch.setattr(web_module, "DEV_AUTH", True)
     app = create_app()
     app.config.update(TESTING=True)
     return app.test_client()
@@ -290,13 +292,11 @@ def test_refund_is_not_repeated_when_the_function_says_no():
     assert CreditService(client).release_and_refund("u1", "job-3") is False
 
 
-def test_missing_function_falls_back_to_table_updates():
-    """An un-migrated database must not crash; it uses the older code path."""
+def test_missing_function_fails_closed_instead_of_table_updates():
+    """An un-migrated database must not silently use an unsafe write path."""
     error = RuntimeError(
         "Could not find the function public.verdict_reserve_credits in the schema cache"
     )
     client = _FakeSupabase(None, error=error)
-    # No tables either, so the fallback path ends in InsufficientCredits (0 credits)
-    # rather than raising the missing-function error.
-    with pytest.raises(InsufficientCredits):
+    with pytest.raises(RuntimeError, match="Could not find the function"):
         CreditService(client).reserve("u1", "job-4", "light")

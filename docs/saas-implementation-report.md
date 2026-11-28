@@ -42,8 +42,8 @@ Backend (`backend/`):
 | `verdict/payments.py` | Stripe wrapper: checkout sessions, webhook verification, `config_status()` |
 | `verdict/pipeline.py` | Mode config, parallel search and scraping, stage timings, metrics, pre-delivery validation, scrape cache |
 | `verdict/evidence.py` | Source classification (8 kinds), product identity checks, claim statuses, limitation detection |
-| `verdict/scoring.py` | Parsers for the three independent 0–100 scores |
-| `verdict/verdict_prompt.py` | 16-section report prompt with the three-score rubric |
+| `verdict/scoring.py` | Authoritative category weights, structured JSON parsing, code-computed totals, band labels |
+| `verdict/verdict_prompt.py` | 12-section report prompt with the three-score rubric and structured JSON score output |
 | `verdict/models.py` | Wallet / subscription / reservation / mechanism models |
 | `web.py` | The HTTP surface (§3) and background job runner |
 | `database/migrations/20261120_saas_monetization.sql` | All new tables, columns, indexes and RLS policies |
@@ -239,9 +239,11 @@ runs can be compared against the budgets.
 ## 11. Output quality
 
 * Three **independent** scores, 0–100: Product Credibility, Evidence Strength,
-  Purchasing Confidence. Missing reviews lower Evidence Strength and Purchasing
-  Confidence, never Product Credibility — a product is not "less credible" because
-  nobody wrote about it.
+  Purchasing Confidence. The model returns one integer per category in a JSON
+  block; `scoring.py` clamps each category to its maximum and computes the totals
+  in code. Weights: Product Credibility 20/15/20/15/10/5/10/5, Evidence Strength
+  25/20/15/15/10/10/5, Purchasing Confidence 35/25/15/15/10. Missing reviews lower
+  Evidence Strength and Purchasing Confidence, never Product Credibility.
 * Manufacturer material is labelled `MANUFACTURER CLAIM` and is never counted as
   independent proof.
 * Eight source classifications; unknown domains are labelled "Unverified content"
@@ -250,8 +252,8 @@ runs can be compared against the budgets.
 * Claim statuses: `VERIFIED`, `MANUFACTURER CLAIM`, `UNVERIFIED`, `CONTRADICTED`.
 * Product identity is checked before scoring, so a same-named but different product
   does not contribute evidence.
-* 16-section report template; a pre-delivery validation pass checks that the
-  sections and the three scores exist and that the evidence basis is disclosed.
+* 12-section report template; a pre-delivery validation pass checks that the
+  sections and all four score labels exist and that the evidence basis is disclosed.
   When validation fails the report is still delivered, with a "Validation notes"
   block listing what was thin — the user paid for the investigation, so it is
   better to ship it with an honest caveat than to fail it. Genuine pipeline
@@ -296,9 +298,9 @@ surviving cancellation, reservation idempotency, refund-exactly-once with bucket
 restoration, free-Light single use and restoration after failure, ledger balance
 chain, webhook signature rejection, invoice idempotency, job ownership, relay
 secret gating, parallel-search timing, scrape-cache hit/miss, mode validation and
-clamping, source classification, limitation detection, the three-score parsers,
-and the atomic-RPC path (insufficient mapping, bucket pass-through, no-op refund,
-and the un-migrated-database fallback).
+clamping, source classification, limitation detection, the rubric totals and
+  band enforcement, and the atomic-RPC path (insufficient mapping, bucket
+  pass-through, no-op refund, and fail-closed behavior when a function is missing).
 
 ## 14. Not verified (and why)
 

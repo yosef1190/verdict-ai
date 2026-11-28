@@ -154,6 +154,18 @@ def _complete_report() -> str:
         "",
         "## 🧠 Final Recommendation",
         "Buy it if the price is right and you value noise cancellation.",
+        "",
+        "```json",
+        '{"product_credibility":{"product_legitimacy":20,"specification_consistency":15,'
+        '"independent_performance_evidence":20,"customer_experiences":15,'
+        '"reliability_and_durability":8,"safety":4},'
+        '"evidence_strength":{"source_reliability":25,"independent_source_coverage":20,'
+        '"exact_product_matching":15,"claim_verification":15,"source_recency":5,'
+        '"source_diversity":2},'
+        '"purchasing_confidence":{"available_evidence":35,"unresolved_risks":25,'
+        '"source_contradictions":15,"missing_critical_information":5,'
+        '"confidence_in_the_recommendation":2}}',
+        "```",
     ]
     return "\n".join(sections)
 

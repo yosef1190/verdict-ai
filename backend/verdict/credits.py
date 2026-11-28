@@ -205,24 +205,14 @@ class CreditService:
     def _rpc(self, name: str, params: dict[str, Any]) -> Any:
         """Run a Postgres function that does an atomic credit operation.
 
-        Returns None when the function is missing (migration not applied), so the
-        caller can fall back to the application-level path. Any other error is a
-        real problem and propagates.
+        A missing or broken function is fatal when Supabase is configured: the
+        application-level fallback can double-spend under concurrency. The
+        in-memory dev store never reaches this method.
         """
         try:
             data = self.sb.rpc(name, params).execute().data
         except Exception as exc:  # noqa: BLE001
-            message = str(exc).lower()
-            missing = (
-                "could not find the function" in message
-                or "pgrst202" in message
-                or ("function" in message and "does not exist" in message)
-            )
-            if missing:
-                logger.warning(
-                    "%s is not installed; falling back to a non-atomic update: %s", name, exc
-                )
-                return None
+            logger.error("Credit RPC %s failed: %s", name, exc)
             raise
         # A scalar jsonb result comes back as the value itself, but list/array
         # shapes are also possible depending on the PostgREST version.
@@ -264,6 +254,7 @@ class CreditService:
                     "purchased_used": usage["purchased_used"],
                     "balance_before": before,
                     "balance_after": wallet.total,
+                    "created_at": datetime.now(timezone.utc).timestamp(),
                 }
                 self._reservations[investigation_id] = record
                 return record
@@ -277,87 +268,20 @@ class CreditService:
                 "p_cost": cost,
             },
         )
-        if atomic:
-            if atomic.get("status") == "insufficient":
-                raise InsufficientCredits(cost, int(atomic.get("available") or 0))
-            return {
-                "investigation_id": investigation_id,
-                "user_id": user_id,
-                "mode": atomic.get("mode", mode),
-                "cost": int(atomic.get("cost") or cost),
-                "status": atomic.get("status", "held"),
-                "subscription_used": int(atomic.get("subscription_used") or 0),
-                "purchased_used": int(atomic.get("purchased_used") or 0),
-                "balance_before": int(atomic.get("balance_before") or 0),
-                "balance_after": int(atomic.get("balance_after") or 0),
-            }
-
-        # Fallback for a database that has not had the migration applied yet.
-        # Idempotency check.
-        try:
-            existing = (
-                self.sb.table("credit_reservations")
-                .select("*")
-                .eq("investigation_id", investigation_id)
-                .limit(1)
-                .execute()
-            )
-            if existing.data:
-                row = existing.data[0]
-                return {
-                    "investigation_id": investigation_id,
-                    "user_id": user_id,
-                    "mode": row.get("mode", mode),
-                    "cost": int(row.get("cost") or cost),
-                    "status": row.get("status", "held"),
-                }
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("Reservation lookup failed for %s: %s", investigation_id, exc)
-
-        wallet = self.get_wallet(user_id)
-        if wallet.total < cost:
-            raise InsufficientCredits(cost, wallet.total)
-
-        before = wallet.total
-        usage = wallet.available_for(cost)
-        wallet.subscription_credits = usage["remaining_subscription"]
-        wallet.purchased_credits = usage["remaining_purchased"]
-        self._write_wallet(user_id, wallet)
-
-        self.sb.table("credit_reservations").insert(
-            {
-                "user_id": user_id,
-                "investigation_id": investigation_id,
-                "mode": mode,
-                "cost": cost,
-                "status": "held",
-                "subscription_used": usage["subscription_used"],
-                "purchased_used": usage["purchased_used"],
-                "balance_before": before,
-                "balance_after": wallet.total,
-            }
-        ).execute()
-
-        self._ledger(
-            user_id=user_id,
-            type="reservation",
-            amount=-cost,
-            mode=mode,
-            investigation_id=investigation_id,
-            balance_before=before,
-            balance_after=wallet.total,
-        )
-
+        if not atomic:
+            raise RuntimeError("Credit reservation returned no result")
+        if atomic.get("status") == "insufficient":
+            raise InsufficientCredits(cost, int(atomic.get("available") or 0))
         return {
             "investigation_id": investigation_id,
             "user_id": user_id,
-            "mode": mode,
-            "cost": cost,
-            "status": "held",
-            "subscription_used": usage["subscription_used"],
-            "purchased_used": usage["purchased_used"],
-            "balance_before": before,
-            "balance_after": wallet.total,
+            "mode": atomic.get("mode", mode),
+            "cost": int(atomic.get("cost") or cost),
+            "status": atomic.get("status", "held"),
+            "subscription_used": int(atomic.get("subscription_used") or 0),
+            "purchased_used": int(atomic.get("purchased_used") or 0),
+            "balance_before": int(atomic.get("balance_before") or 0),
+            "balance_after": int(atomic.get("balance_after") or 0),
         }
 
     def finalize(self, user_id: str, investigation_id: str) -> bool:
@@ -377,26 +301,7 @@ class CreditService:
         atomic = self._rpc(
             "verdict_finalize_credits", {"p_investigation_id": investigation_id}
         )
-        if atomic is not None:
-            return bool(atomic)
-
-        try:
-            resp = (
-                self.sb.table("credit_reservations")
-                .update(
-                    {
-                        "status": "finalized",
-                        "resolved_at": datetime.now(timezone.utc).isoformat(),
-                    }
-                )
-                .eq("investigation_id", investigation_id)
-                .eq("status", "held")
-                .execute()
-            )
-            return bool(resp.data)
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("Finalize failed for %s: %s", investigation_id, exc)
-            return False
+        return bool(atomic)
 
     def release_and_refund(self, user_id: str, investigation_id: str, reason: str = "") -> bool:
         """Release a held reservation and restore the credits.
@@ -424,76 +329,41 @@ class CreditService:
             "verdict_refund_credits",
             {"p_investigation_id": investigation_id, "p_reason": reason},
         )
-        if atomic is not None:
-            return bool(atomic.get("refunded"))
+        return bool(atomic.get("refunded")) if atomic else False
+
+    def stale_reservations(self, older_than_seconds: int) -> list[dict[str, Any]]:
+        """List held reservations older than ``older_than_seconds``.
+
+        These are investigations that never reported back (e.g. the worker was
+        killed by a deploy), so their credits must be released by a sweep.
+        """
+        cutoff = datetime.now(timezone.utc).timestamp() - older_than_seconds
+        if self.sb is None:
+            with self._lock:
+                return [
+                    dict(record)
+                    for record in self._reservations.values()
+                    if record.get("status") == "held"
+                    and float(record.get("created_at") or 0) < cutoff
+                ]
 
         try:
-            existing = (
+            rows = (
                 self.sb.table("credit_reservations")
                 .select("*")
-                .eq("investigation_id", investigation_id)
-                .limit(1)
+                .eq("status", "held")
+                .lt(
+                    "created_at",
+                    datetime.fromtimestamp(cutoff, tz=timezone.utc).isoformat(),
+                )
                 .execute()
+                .data
+                or []
             )
-            if not existing.data:
-                return False
-            row = existing.data[0]
-            if row.get("status") != "held":
-                return False
-
-            already = (
-                self.sb.table("investigation_refunds")
-                .select("id")
-                .eq("investigation_id", investigation_id)
-                .limit(1)
-                .execute()
-            )
-            if already.data:
-                return False
-
-            cost = int(row.get("cost") or 0)
-            wallet = self.get_wallet(user_id)
-            before = wallet.total
-            # Restore each bucket exactly as it was consumed. Reservations that
-            # predate the per-bucket columns fall back to purchased credits,
-            # which never expire.
-            sub_used = int(row.get("subscription_used") or 0)
-            pur_used = int(row.get("purchased_used") or 0)
-            if sub_used + pur_used == 0:
-                pur_used = cost
-            wallet.subscription_credits += sub_used
-            wallet.purchased_credits += pur_used
-            self._write_wallet(user_id, wallet)
-
-            self.sb.table("credit_reservations").update(
-                {
-                    "status": "released",
-                    "resolved_at": datetime.now(timezone.utc).isoformat(),
-                }
-            ).eq("investigation_id", investigation_id).execute()
-
-            self.sb.table("investigation_refunds").insert(
-                {
-                    "investigation_id": investigation_id,
-                    "user_id": user_id,
-                    "credits_refunded": cost,
-                    "reason": reason,
-                }
-            ).execute()
-
-            self._ledger(
-                user_id=user_id,
-                type="refund",
-                amount=cost,
-                mode=row.get("mode"),
-                investigation_id=investigation_id,
-                balance_before=before,
-                balance_after=wallet.total,
-            )
-            return True
         except Exception as exc:  # noqa: BLE001
-            logger.warning("Refund failed for %s: %s", investigation_id, exc)
-            return False
+            logger.warning("Stale reservation lookup failed: %s", exc)
+            return []
+        return rows
 
     # ---------------------------------------------------------------- ledger
 
@@ -663,46 +533,13 @@ class CreditService:
                 "p_description": description,
             },
         )
-        if atomic is not None:
-            if atomic.get("granted"):
-                logger.info(
-                    "Granted %s %s credits to %s (ref=%s)", amount, kind, user_id, reference
-                )
-            return bool(atomic.get("granted"))
-
-        if reference:
-            try:
-                dup = (
-                    self.sb.table("credit_transactions")
-                    .select("id")
-                    .eq("payment_reference", reference)
-                    .limit(1)
-                    .execute()
-                )
-                if dup.data:
-                    return False
-            except Exception:  # noqa: BLE001
-                pass
-
-        wallet = self.get_wallet(user_id)
-        before = wallet.total
-        if kind == "subscription":
-            wallet.subscription_credits = amount if reset else wallet.subscription_credits + amount
-        else:
-            wallet.purchased_credits += amount
-        self._write_wallet(user_id, wallet)
-        self._ledger(
-            user_id=user_id,
-            type=type,
-            amount=amount,
-            payment_reference=reference,
-            balance_before=before,
-            balance_after=wallet.total,
-            amount_cents=amount_cents,
-            description=description,
-            reference_type="subscription_grant" if kind == "subscription" else type,
-        )
-        return True
+        if not atomic:
+            raise RuntimeError("Credit grant returned no result")
+        if atomic.get("granted"):
+            logger.info(
+                "Granted %s %s credits to %s (ref=%s)", amount, kind, user_id, reference
+            )
+        return bool(atomic.get("granted"))
 
     def clear_subscription_credits(self, user_id: str, reference: str) -> bool:
         """Zero the subscription bucket at real cancellation, never purchases."""

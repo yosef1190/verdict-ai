@@ -1,12 +1,16 @@
-"""The Verdict 0-100 score bands, and a post-processor that enforces them.
+"""The Verdict 0-100 rubric, bands, and deterministic score post-processing.
 
-The AI writes the score; the label for that score always comes from this table,
-so a model can never print a recommendation that disagrees with the number.
+The model supplies one integer per rubric category. Code computes the three
+component totals and the overall Verdict Score, and the band label always comes
+from this table, so a model can never print a recommendation that disagrees with
+the number.
 """
 
 from __future__ import annotations
 
+import json
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass
 
 
@@ -50,6 +54,35 @@ BANDS: tuple[Band, ...] = (
          "Exceptional overall credibility with minimal concerns."),
 )
 
+SCORE_WEIGHTS: dict[str, dict[str, int]] = {
+    "product_credibility": {
+        "product_legitimacy": 20,
+        "specification_consistency": 15,
+        "independent_performance_evidence": 20,
+        "customer_experiences": 15,
+        "reliability_and_durability": 10,
+        "safety": 5,
+        "brand_credibility": 10,
+        "seller_authenticity": 5,
+    },
+    "evidence_strength": {
+        "source_reliability": 25,
+        "independent_source_coverage": 20,
+        "exact_product_matching": 15,
+        "claim_verification": 15,
+        "source_recency": 10,
+        "source_diversity": 10,
+        "evidence_consistency": 5,
+    },
+    "purchasing_confidence": {
+        "available_evidence": 35,
+        "unresolved_risks": 25,
+        "source_contradictions": 15,
+        "missing_critical_information": 15,
+        "confidence_in_the_recommendation": 10,
+    },
+}
+
 
 def band_for(score: int) -> Band:
     score = max(0, min(100, int(score)))
@@ -69,6 +102,98 @@ def interpretation_markdown() -> str:
 
 def recommendation_labels() -> str:
     return " / ".join(band.title for band in BANDS)
+
+
+def score_schema_markdown() -> str:
+    lines = ["```json", "{"]
+    entries = list(SCORE_WEIGHTS.items())
+    for index, (score, categories) in enumerate(entries):
+        suffix = "," if index < len(entries) - 1 else ""
+        lines.append(f'  "{score}": {{')
+        categories_list = list(categories.items())
+        for cat_index, (category, maximum) in enumerate(categories_list):
+            cat_suffix = "," if cat_index < len(categories_list) - 1 else ""
+            lines.append(f'    "{category}": "0-{maximum}"{cat_suffix}')
+        lines.append(f"  }}{suffix}")
+    lines.append("}")
+    lines.append("```")
+    return "\n".join(lines)
+
+
+def _normalize_key(value: object) -> str:
+    return re.sub(r"[^a-z0-9]+", "_", str(value).strip().lower()).strip("_")
+
+
+def _as_number(value: object) -> float | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str):
+        try:
+            return float(value.strip())
+        except ValueError:
+            return None
+    return None
+
+
+def normalize_score_json(payload: object) -> dict[str, dict[str, float]]:
+    normalized: dict[str, dict[str, float]] = {}
+    if not isinstance(payload, Mapping):
+        return normalized
+    for score, categories in payload.items():
+        key = _normalize_key(score)
+        if key not in SCORE_WEIGHTS or not isinstance(categories, Mapping):
+            continue
+        values: dict[str, float] = {}
+        for category, value in categories.items():
+            number = _as_number(value)
+            if number is not None:
+                values[_normalize_key(category)] = number
+        normalized[key] = values
+    return normalized
+
+
+def parse_score_json(markdown: str) -> dict[str, dict[str, float]]:
+    blocks = re.findall(r"```(?:json)?\s*(\{.*?\})\s*```", markdown, re.I | re.S)
+    decoder = json.JSONDecoder()
+    payloads: list[object] = []
+    for block in blocks:
+        try:
+            payloads.append(json.loads(block))
+        except json.JSONDecodeError:
+            continue
+    for match in re.finditer(r"\{", markdown):
+        try:
+            payload, _ = decoder.raw_decode(markdown[match.start() :])
+        except json.JSONDecodeError:
+            continue
+        payloads.append(payload)
+    for payload in reversed(payloads):
+        normalized = normalize_score_json(payload)
+        if normalized:
+            return normalized
+    return {}
+
+
+def compute_score_totals(
+    category_scores: Mapping[str, Mapping[str, object]],
+) -> dict[str, int]:
+    normalized = normalize_score_json(category_scores)
+    totals: dict[str, int] = {}
+    for score, weights in SCORE_WEIGHTS.items():
+        values = normalized.get(score, {})
+        total = 0.0
+        for category, maximum in weights.items():
+            value = values.get(category)
+            if value is None:
+                continue
+            total += max(0.0, min(float(maximum), float(value)))
+        totals[score] = int(total + 0.5)
+    totals["verdict"] = int(
+        sum(totals.values()) / len(totals) + 0.5
+    )
+    return totals
 
 
 _SCORE = re.compile(r"Verdict\s+Score\s*:?\s*\**\s*(\d{1,3})(?:\.\d+)?\s*\**\s*/\s*100", re.I)
@@ -148,3 +273,47 @@ def apply_score_bands(markdown: str) -> str:
         return f"{match.group(1)}{band.title}{match.group(2)}{score}{match.group(4)}"
 
     return _FINAL_VERDICT.sub(fix_final, markdown)
+
+
+_SCORE_LINES: dict[str, re.Pattern[str]] = {
+    label: re.compile(
+        rf"({re.escape(label)}\s*:?\s*\**\s*)(\d{{1,3}})(?:\.\d+)?(\s*\**\s*/\s*100)",
+        re.I,
+    )
+    for label in (
+        "Verdict Score",
+        "Product Credibility",
+        "Evidence Strength",
+        "Purchasing Confidence",
+    )
+}
+_JSON_BLOCK = re.compile(r"\n?```(?:json)?\s*\{.*?\}\s*```\s*\n?", re.I | re.S)
+
+
+def _rewrite_score_line(markdown: str, label: str, value: int) -> str:
+    pattern = _SCORE_LINES[label]
+    replacement = rf"\g<1>{value}\g<3>"
+    rewritten, count = pattern.subn(replacement, markdown, count=1)
+    if count:
+        return rewritten
+    lines = markdown.split("\n")
+    for index, line in enumerate(lines):
+        if re.search(r"Overall Verdict", line, re.I):
+            lines[index + 1 : index + 1] = ["", f"**{label}: {value}/100**"]
+            return "\n".join(lines)
+    return f"**{label}: {value}/100**\n\n" + markdown
+
+
+def apply_structured_scores(
+    markdown: str, category_scores: Mapping[str, Mapping[str, object]]
+) -> tuple[str, dict[str, int]]:
+    totals = compute_score_totals(category_scores)
+    markdown = _JSON_BLOCK.sub("\n", markdown)
+    for label, key in (
+        ("Verdict Score", "verdict"),
+        ("Product Credibility", "product_credibility"),
+        ("Evidence Strength", "evidence_strength"),
+        ("Purchasing Confidence", "purchasing_confidence"),
+    ):
+        markdown = _rewrite_score_line(markdown, label, totals[key])
+    return apply_score_bands(markdown), totals

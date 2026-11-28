@@ -180,7 +180,7 @@ Reports are written to `reports/` by default. Use `--out DIR` to change that or 
 *AI summaries can be wrong. Verify critical facts against the linked sources.*
 ```
 
-`review` reports follow the Verdict format instead: an overall score and recommendation, product overview, positives, problems and red flags, customer feedback, claims vs reality, value for money, brand trustworthiness, alternatives, who should buy or avoid it, and a final recommendation. The score, recommendation, and confidence are explicitly tied to the strength of the collected evidence.
+`review` reports follow the Verdict format instead: an overall Verdict Score, three component scores (Product Credibility, Evidence Strength, Purchasing Confidence), a recommendation, product overview, positives, problems and red flags, customer feedback, claims vs reality, value for money, brand trustworthiness, alternatives, who should buy or avoid it, and a final recommendation. The model supplies per-category integers in a JSON block; the application computes the totals, and the score, recommendation, and confidence are explicitly tied to the strength of the collected evidence.
 
 ## How it works
 

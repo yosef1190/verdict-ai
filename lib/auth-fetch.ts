@@ -7,8 +7,8 @@ import { supabase } from "./supabase";
  * 1. Gets the current session from Supabase
  * 2. Attaches Authorization: Bearer <access_token> to every request
  * 3. On 401, tries one session refresh and retry
- * 4. Only redirects to login if the refresh also fails
- * 5. Returns { res, body } for consistent handling across the app
+ * 4. Returns "session_expired" if refresh fails, "unauthorized" if the retry fails
+ * 5. Returns { res, body, error } for consistent handling across the app
  */
 export async function authFetch(
   path: string,
@@ -43,25 +43,31 @@ export async function authFetch(
 
   // Step 3: If 401, try to refresh the session and retry once
   if (res.status === 401) {
-    // Try to refresh the session
     const { data: refreshed, error: refreshError } = await supabase.auth.refreshSession();
 
-    if (!refreshError && refreshed?.session?.access_token) {
-      // Refresh succeeded, retry the request with new token
-      const newToken = refreshed.session.access_token;
-      const retryHeaders = new Headers(init.headers);
-      if (newToken) retryHeaders.set("Authorization", `Bearer ${newToken}`);
-      const res2 = await fetch(path, {
-        ...init,
-        headers: retryHeaders,
-        credentials: "include",
-      });
-      const body2 = await res2.json().catch(() => ({}));
-      return { res: res2, body: body2 };
+    if (refreshError || !refreshed?.session?.access_token) {
+      return { res: null, body: { error: "Session expired. Please log in again." }, error: "session_expired" };
     }
 
-    // Refresh failed - return 401 error so caller can redirect to login
-    return { res: null, body: { error: "Session expired. Please log in again." }, error: "session_expired" };
+    const newToken = refreshed.session.access_token;
+    const retryHeaders = new Headers(init.headers);
+    retryHeaders.set("Authorization", `Bearer ${newToken}`);
+    const res2 = await fetch(path, {
+      ...init,
+      headers: retryHeaders,
+      credentials: "include",
+    });
+    const body2 = await res2.json().catch(() => ({}));
+
+    if (res2.status === 401) {
+      return {
+        res: res2,
+        body: { ...body2, error: body2.error || "You are not authorized for this request." },
+        error: "unauthorized",
+      };
+    }
+
+    return { res: res2, body: body2 };
   }
 
   // Step 4: Successful response
