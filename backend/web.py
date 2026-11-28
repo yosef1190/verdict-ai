@@ -446,6 +446,92 @@ def _grant_subscription(
     return granted
 
 
+def _process_checkout_session(data: dict) -> dict:
+    metadata = data.get("metadata") or {}
+    user_id = metadata.get("user_id") or data.get("client_reference_id")
+    kind = metadata.get("kind")
+    session_id = data.get("id")
+    result = {"kind": kind, "granted": False, "error": ""}
+
+    if not user_id:
+        result["error"] = "This checkout is not linked to an account."
+        return result
+
+    if kind == "credits":
+        quantity = int(metadata.get("quantity") or 0)
+        if quantity <= 0:
+            result["error"] = "This checkout has no credit quantity."
+            return result
+        amount_cents = int(metadata.get("total_cents") or 0) or None
+        result["granted"] = bool(
+            credit_service.grant_credits(
+                user_id,
+                quantity,
+                kind="purchased",
+                type="purchase",
+                reference=session_id,
+                amount_cents=amount_cents,
+                description=f"{quantity} research credits purchased",
+            )
+        )
+        if sb is not None:
+            try:
+                sb.table("payments").update(
+                    {"status": "succeeded"}
+                ).eq("provider_session_id", session_id).execute()
+            except Exception:  # noqa: BLE001
+                pass
+        return result
+
+    if kind == "subscription":
+        plan = metadata.get("plan")
+        interval = metadata.get("interval")
+        subscription_id = data.get("subscription")
+        result["granted"] = bool(
+            credit_service.grant_credits(
+                user_id,
+                _allowance_for(plan),
+                kind="subscription",
+                type="subscription_grant",
+                reference=session_id,
+                reset=True,
+                amount_cents=int(metadata.get("total_cents") or 0) or None,
+                description=f"First month of {plan or 'subscription'} credits",
+            )
+        )
+        if sb is not None and subscription_id:
+            existing = _subscription_by_stripe_id(subscription_id)
+            record = {
+                "user_id": user_id,
+                "plan": plan,
+                "billing_interval": interval,
+                "status": "active",
+                "credits_per_period": _allowance_for(plan),
+                "stripe_subscription_id": subscription_id,
+                "stripe_customer_id": data.get("customer") or None,
+                "last_invoice_id": data.get("invoice") or None,
+                "last_credit_month": datetime.now(timezone.utc).strftime("%Y-%m"),
+            }
+            try:
+                if existing:
+                    sb.table("subscriptions").update(record).eq(
+                        "id", existing["id"]
+                    ).execute()
+                else:
+                    sb.table("subscriptions").insert(record).execute()
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("Could not store subscription: %s", exc)
+            try:
+                state = payment_service.retrieve_subscription(subscription_id)
+                _apply_stripe_subscription(state, user_id=user_id)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("Could not refresh subscription state: %s", exc)
+        return result
+
+    result["error"] = "Unsupported checkout type."
+    return result
+
+
 def _apply_stripe_subscription(state: dict, user_id: str | None = None) -> None:
     """Persist the authoritative Stripe subscription state."""
     if sb is None:
@@ -1019,6 +1105,37 @@ def create_app(settings: Settings | None = None) -> Flask:
             return jsonify(error=str(exc)), 503
         return jsonify(url=checkout.url, session_id=checkout.session_id)
 
+    @app.post("/api/checkout/confirm")
+    def checkout_confirm():
+        user = _user_from_request()
+        if user is None:
+            return jsonify(error="Please log in."), 401
+        payload = request.get_json(silent=True) or {}
+        session_id = str(payload.get("session_id") or "").strip()
+        if not session_id:
+            return jsonify(error="Missing checkout session."), 400
+        session = payment_service.retrieve_checkout_session(session_id)
+        if not session or (session.get("id") and session.get("id") != session_id):
+            return jsonify(error="Could not verify this checkout session."), 400
+        metadata = session.get("metadata") or {}
+        status = session.get("payment_status")
+        if status not in ("paid", "no_payment_required"):
+            return jsonify(error="This checkout is not paid yet."), 409
+        if metadata.get("kind") == "credits" and status != "paid":
+            return jsonify(error="This checkout is not paid yet."), 409
+        if metadata.get("user_id") != user["id"]:
+            return jsonify(error="This checkout does not belong to this account."), 403
+        result = _process_checkout_session(session)
+        if result.get("error"):
+            return jsonify(error=result["error"]), 400
+        wallet = credit_service.get_wallet(user["id"])
+        return jsonify(
+            ok=True,
+            granted=bool(result.get("granted")),
+            kind=result.get("kind") or "credits",
+            purchased_credits=wallet.purchased_credits,
+        )
+
 
     def _owned_subscription(user_id: str, response):
         row = _subscription_for_user(user_id)
@@ -1257,77 +1374,7 @@ def create_app(settings: Settings | None = None) -> Flask:
 
         try:
             if event_type == "checkout.session.completed":
-                user_id = metadata.get("user_id") or data.get("client_reference_id")
-                kind = metadata.get("kind")
-                session_id = data.get("id")
-
-                if not user_id:
-                    logger.warning("Webhook missing user_id: %s", event_type)
-                    return jsonify(ok=True)
-
-                if kind == "credits":
-                    quantity = int(metadata.get("quantity") or 0)
-                    if quantity <= 0:
-                        return jsonify(ok=True)
-                    amount_cents = int(metadata.get("total_cents") or 0) or None
-                    credit_service.grant_credits(
-                        user_id,
-                        quantity,
-                        kind="purchased",
-                        type="purchase",
-                        reference=session_id,
-                        amount_cents=amount_cents,
-                        description=f"{quantity} research credits purchased",
-                    )
-                    if sb is not None:
-                        try:
-                            sb.table("payments").update(
-                                {"status": "succeeded"}
-                            ).eq("provider_session_id", session_id).execute()
-                        except Exception:  # noqa: BLE001
-                            pass
-
-                elif kind == "subscription":
-                    plan = metadata.get("plan")
-                    interval = metadata.get("interval")
-                    subscription_id = data.get("subscription")
-                    credit_service.grant_credits(
-                        user_id,
-                        _allowance_for(plan),
-                        kind="subscription",
-                        type="subscription_grant",
-                        reference=session_id,
-                        reset=True,
-                        amount_cents=int(metadata.get("total_cents") or 0) or None,
-                        description=f"First month of {plan or 'subscription'} credits",
-                    )
-                    if sb is not None and subscription_id:
-                        existing = _subscription_by_stripe_id(subscription_id)
-                        record = {
-                            "user_id": user_id,
-                            "plan": plan,
-                            "billing_interval": interval,
-                            "status": "active",
-                            "credits_per_period": _allowance_for(plan),
-                            "stripe_subscription_id": subscription_id,
-                            "stripe_customer_id": data.get("customer") or None,
-                            "last_invoice_id": data.get("invoice") or None,
-                            "last_credit_month": datetime.now(timezone.utc).strftime("%Y-%m"),
-                        }
-                        try:
-                            if existing:
-                                sb.table("subscriptions").update(record).eq(
-                                    "id", existing["id"]
-                                ).execute()
-                            else:
-                                sb.table("subscriptions").insert(record).execute()
-                        except Exception as exc:  # noqa: BLE001
-                            logger.warning("Could not store subscription: %s", exc)
-                        try:
-                            state = payment_service.retrieve_subscription(subscription_id)
-                            _apply_stripe_subscription(state, user_id=user_id)
-                        except Exception as exc:  # noqa: BLE001
-                            logger.warning("Could not refresh subscription state: %s", exc)
+                _process_checkout_session(data)
 
             elif event_type == "invoice.paid":
                 sub_details = data.get("subscription_details") or {}

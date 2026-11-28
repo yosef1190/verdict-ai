@@ -141,6 +141,7 @@ export default function Wallet() {
   const [error, setError] = useState("");
   const [busy, setBusy] = useState("");
   const [refreshKey, setRefreshKey] = useState(0);
+  const [checkoutConfirmed, setCheckoutConfirmed] = useState(false);
   const [searchText, setSearchText] = useState("");
   const [query, setQuery] = useState("");
   const [typeFilter, setTypeFilter] = useState("");
@@ -154,6 +155,31 @@ export default function Wallet() {
   useEffect(() => {
     if (!loading && !user) router.replace("/login?next=/wallet");
   }, [loading, user, router]);
+
+  useEffect(() => {
+    if (loading || !user || checkoutConfirmed) return;
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("checkout") !== "success") return;
+    const sessionId = params.get("session_id");
+    if (!sessionId) {
+      router.replace("/wallet");
+      return;
+    }
+    setCheckoutConfirmed(true);
+    void (async () => {
+      try {
+        await api("/api/checkout/confirm", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ session_id: sessionId }),
+        });
+        setRefreshKey((key) => key + 1);
+        router.replace("/wallet");
+      } catch (err: any) {
+        setError(err.message);
+      }
+    })();
+  }, [loading, user, checkoutConfirmed, router]);
 
   useEffect(() => {
     if (loading || !user) return;

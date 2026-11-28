@@ -135,7 +135,7 @@ class PaymentService:
                 "quantity": str(quantity),
                 "total_cents": str(total_cents),
             },
-            success_url=f"{self.app_url}/dashboard?checkout=success",
+            success_url=f"{self.app_url}/wallet?checkout=success&session_id={{CHECKOUT_SESSION_ID}}",
             cancel_url=f"{self.app_url}/pricing?checkout=canceled",
         )
         return CheckoutResult(url=session.url, session_id=session.id)
@@ -178,7 +178,7 @@ class PaymentService:
             # Copied onto the subscription (and its invoices), so renewal events
             # can be tied back to the account without trusting frontend data.
             subscription_data={"metadata": meta},
-            success_url=f"{self.app_url}/dashboard?checkout=success",
+            success_url=f"{self.app_url}/wallet?checkout=success&session_id={{CHECKOUT_SESSION_ID}}",
             cancel_url=f"{self.app_url}/pricing?checkout=canceled",
         )
         return CheckoutResult(url=session.url, session_id=session.id)
@@ -224,6 +224,8 @@ class PaymentService:
             "id": _field(session, "id", ""),
             "payment_status": _field(session, "payment_status", ""),
             "client_reference_id": _field(session, "client_reference_id"),
+            "customer": str(_field(session, "customer", "") or ""),
+            "subscription": str(_field(session, "subscription", "") or ""),
             "metadata": _field(session, "metadata", {}) or {},
         }
 

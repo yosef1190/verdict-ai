@@ -5,6 +5,7 @@ from types import SimpleNamespace
 import pytest
 
 import web as web_module
+from verdict import payments as payments_module
 from verdict.config import Settings
 from verdict.errors import VerdictError
 from verdict.pipeline import ResearchResult
@@ -293,6 +294,139 @@ def test_checkout_reports_missing_configuration_cleanly(client):
 def test_checkout_validates_quantity_before_payment(client):
     res = client.post("/api/checkout/credits", json={"quantity": 1}, headers=AUTH)
     assert res.status_code == 400
+
+
+def test_checkout_success_urls_include_session_id(monkeypatch):
+    captured = []
+
+    class FakeSession:
+        url = "https://checkout.stripe.test/session"
+        id = "cs_test_success"
+
+    class FakeSessionResource:
+        @staticmethod
+        def create(**kwargs):
+            captured.append(kwargs)
+            return FakeSession()
+
+    fake_stripe = SimpleNamespace(checkout=SimpleNamespace(Session=FakeSessionResource))
+    monkeypatch.setenv("STRIPE_SECRET_KEY", "sk_test_dummy")
+    monkeypatch.setenv("APP_URL", "https://verdict.test")
+    monkeypatch.setattr(payments_module, "_stripe", fake_stripe)
+    service = payments_module.PaymentService()
+    expected = (
+        "https://verdict.test/wallet?checkout=success&session_id={CHECKOUT_SESSION_ID}"
+    )
+
+    service.create_credit_checkout(
+        user_id="u1",
+        email="u1@example.com",
+        quantity=25,
+        unit_price_cents=100,
+        total_cents=2500,
+    )
+    assert captured[-1]["success_url"] == expected
+
+    service.price_ids["research_pro:monthly"] = "price_test"
+    service.create_subscription_checkout(
+        user_id="u1",
+        email="u1@example.com",
+        plan="research_pro",
+        interval="monthly",
+    )
+    assert captured[-1]["success_url"] == expected
+
+
+def _confirm_session(session_id="cs_confirm_1", user="confirm-user", status="paid"):
+    return {
+        "id": session_id,
+        "payment_status": status,
+        "client_reference_id": user,
+        "metadata": {
+            "kind": "credits",
+            "user_id": user,
+            "quantity": "25",
+            "total_cents": "2000",
+        },
+    }
+
+
+def test_checkout_confirm_grants_only_once(client, monkeypatch):
+    session = _confirm_session()
+    monkeypatch.setattr(
+        web_module.payment_service,
+        "retrieve_checkout_session",
+        lambda session_id: session if session_id == session["id"] else None,
+    )
+    headers = {"X-User-Id": "confirm-user"}
+
+    first = client.post(
+        "/api/checkout/confirm", json={"session_id": session["id"]}, headers=headers
+    )
+    assert first.status_code == 200
+    assert first.get_json()["granted"] is True
+    assert first.get_json()["purchased_credits"] == 25
+
+    second = client.post(
+        "/api/checkout/confirm", json={"session_id": session["id"]}, headers=headers
+    )
+    assert second.status_code == 200
+    assert second.get_json()["granted"] is False
+    assert second.get_json()["purchased_credits"] == 25
+
+
+def test_checkout_confirm_rejects_unpaid_session(client, monkeypatch):
+    session = _confirm_session(status="unpaid")
+    monkeypatch.setattr(
+        web_module.payment_service,
+        "retrieve_checkout_session",
+        lambda session_id: session if session_id == session["id"] else None,
+    )
+    res = client.post(
+        "/api/checkout/confirm",
+        json={"session_id": session["id"]},
+        headers={"X-User-Id": "confirm-user"},
+    )
+    assert res.status_code == 409
+    assert web_module.credit_service.get_wallet("confirm-user").purchased_credits == 0
+
+
+def test_checkout_confirm_rejects_another_users_session(client, monkeypatch):
+    session = _confirm_session(user="owner-user")
+    monkeypatch.setattr(
+        web_module.payment_service,
+        "retrieve_checkout_session",
+        lambda session_id: session if session_id == session["id"] else None,
+    )
+    res = client.post(
+        "/api/checkout/confirm",
+        json={"session_id": session["id"]},
+        headers={"X-User-Id": "other-user"},
+    )
+    assert res.status_code == 403
+    assert web_module.credit_service.get_wallet("other-user").purchased_credits == 0
+    assert web_module.credit_service.get_wallet("owner-user").purchased_credits == 0
+
+
+def test_checkout_confirm_after_webhook_does_not_double_grant(client, monkeypatch):
+    session = _confirm_session(session_id="cs_both")
+    event = _credit_purchase_event(session_id=session["id"], user="confirm-user")
+    assert _post_event(client, monkeypatch, event).status_code == 200
+    monkeypatch.setattr(
+        web_module.payment_service,
+        "retrieve_checkout_session",
+        lambda session_id: session if session_id == session["id"] else None,
+    )
+    res = client.post(
+        "/api/checkout/confirm",
+        json={"session_id": session["id"]},
+        headers={"X-User-Id": "confirm-user"},
+    )
+    assert res.status_code == 200
+    assert res.get_json()["granted"] is False
+    assert client.get(
+        "/api/wallet", headers={"X-User-Id": "confirm-user"}
+    ).get_json()["purchased_credits"] == 25
 
 
 def _post_event(client, monkeypatch, event):
